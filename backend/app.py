@@ -258,4 +258,4 @@ def serveFrontend():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    app.run(debug=True)
+    app.run(debug=True, port=int(os.environ.get("PORT", 5050)))

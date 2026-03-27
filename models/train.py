@@ -31,7 +31,10 @@ class ModelTrainer:
 
         print("\n Training RandomForest")
 
-        rf = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+        rf = RandomForestClassifier(
+            n_estimators=50, max_depth=4, min_samples_leaf=5,
+            random_state=42, n_jobs=-1,
+        )
         rf.fit(xTrain, yTrain)
 
         yPrediction = rf.predict(xTest)
