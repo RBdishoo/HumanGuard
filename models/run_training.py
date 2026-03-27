@@ -1,48 +1,63 @@
 from models.dataset import ModelDataset
 from models.train import ModelTrainer
 import logging
+import json
+
+from backend.features.dataset_builder import DatasetBuilder
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-if __name__ == '__main__':
-    featuresCSV = 'backend/data/processed/training_data_sessions.csv'
+
+def main():
+    # Batch-level MVP training:
+    # - Build a batch-level feature CSV (one row per ingested JSONL batch).
+    # - Join labels by sessionID.
+    # - Train a classifier that predicts prob(bot) per batch.
+    signalsJsonlPath = 'backend/data/raw/signals.jsonl'
+    batchCSV = 'backend/data/processed/training_data_batches.csv'
     labelsCSV = 'backend/data/raw/labels.csv'
 
-    #Load and Prepare
-    dataset = ModelDataset(featuresCSV, labelsCSV)
+    # 1) Build features from raw signals
+    builder = DatasetBuilder(signalsJsonlPath)
+    logger.info("Building batch-level dataset...")
+    builder.buildBatchLevelDataset(batchCSV)
+
+    # 2) Load features + labels and prepare ML arrays
+    dataset = ModelDataset(batchCSV, labelsCSV)
     xTrain, xTest, yTrain, yTest, featureNames, scaler = dataset.prepare()
 
     print(f"Train shape: {xTrain.shape}, Test shape: {xTest.shape}")
-    print(f"Feature Names: {featureNames[:5]}...") #Shows first 5 
+    print(f"Feature Names sample: {featureNames[:5]}...")
 
-
-    """
-    #Train Models
+    # 3) Train model
     trainer = ModelTrainer()
-
-    #RandomForest
-    rfModel, rfMetrics, rfImportance = trainer.trainRandomForest(xTrain, xTest, yTrain, yTest, featureNames)
+    rfModel, rfMetrics, rfImportance = trainer.trainRandomForest(
+        xTrain, xTest, yTrain, yTest, featureNames
+    )
 
     print(f"RandomForest Accuracy: {rfMetrics['accuracy']:.4f}")
-    print(f"RandomForst ROC-AUC: {rfMetrics['roc_auc']:.4f}")
+    print(f"RandomForest ROC-AUC: {rfMetrics['roc_auc']:.4f}")
+
+    # 4) Save inference artifacts required by /api/score
+    import joblib
+    trainedDir = trainer.outputDir
+
     trainer.saveModel(rfModel, 'RandomForest')
+    joblib.dump(scaler, trainedDir / "scaler.pkl")
+    with open(trainedDir / "feature_names.json", "w") as f:
+        json.dump(featureNames, f)
 
-    #XGBoost
-    xgbModel, xgbMetrics, xgbImportance = trainer.trainXGBoost(xTrain, xTest, yTrain, yTest, featureNames)
+    threshold = 0.5
+    with open(trainedDir / "threshold.json", "w") as f:
+        json.dump({"threshold": threshold}, f)
 
-    print(f"XGBoost Accuracy: {xgbMetrics['accuracy']:.4f}")
-    print(f"XGBoost ROC-AUC: {xgbMetrics['roc_auc']:.4f}")
-    trainer.saveModel(xgbModel, 'XGBoost')
+    # Save metrics and feature importance for offline review
+    trainer.saveMetrics([rfMetrics], outputFile="metrics.json")
+    rfImportance.to_csv(trainedDir / "rf_feature_importance.csv", index=False)
 
-    #Save Metrics
-    allMetrics = [rfMetrics, xgbMetrics]
-    trainer.saveMetrics(allMetrics)
+    print("\nTraining Complete. Artifacts saved to models/trained/")
 
-    #Save Feature Importance
-    rfImportance.to_csv('models/trained/rf_feature_importance.csv', index=False)
-    xgbImportance.to_csv('models/trained/xgb_feature_importnace.csv', index=False)
 
-    print("\n Training Complete")
-
-    """
+if __name__ == '__main__':
+    main()

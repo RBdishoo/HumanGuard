@@ -173,36 +173,33 @@ class FeatureExtractor:
         pauseCount = 0
         totalPauseMs = 0
         isPaused = False
-        pauseStartMs = 0
+        pauseStartMs = 0.0
 
-        #Running cumulative time to know where we are in the batch
-        for i, (dist, _) in enumerate(zip(distances, timeDeltas)):
-            elapsedUntilSegmentStart = sum(timeDeltas[:i])
+        for i, dist in enumerate(distances):
+            elapsedUntilSegmentStart = float(sum(timeDeltas[:i]))
 
             if dist < self.pauseDistThresh:
                 if not isPaused:
                     isPaused = True
                     pauseStartMs = elapsedUntilSegmentStart
-
             else:
                 if isPaused:
                     pauseEndMs = elapsedUntilSegmentStart
                     pauseDuration = pauseEndMs - pauseStartMs
                     if pauseDuration >= self.pauseDurThresh:
                         pauseCount += 1
-                        totalPauseMs = pauseDuration
+                        totalPauseMs += pauseDuration
                     isPaused = False
 
-            #Handle ongoing pause at end
-            if isPaused:
-               totalElapsed = sum(timeDeltas)
-               pauseDuration = totalElapsed - pauseStartMs
-               if pauseDuration >= self.pauseDurThresh:
-                   pauseCount += 1
-                   totalPauseMs += pauseDuration
+        if isPaused:
+            totalElapsed = float(sum(timeDeltas))
+            pauseDuration = totalElapsed - pauseStartMs
+            if pauseDuration >= self.pauseDurThresh:
+                pauseCount += 1
+                totalPauseMs += pauseDuration
 
-            return pauseCount, totalPauseMs
-        
+        return pauseCount, totalPauseMs
+
     def extractClickFeatures(self, clicks: List[dict]) -> Dict[str, float]:
        """
        Extract Click behavior features
@@ -367,37 +364,64 @@ class FeatureExtractor:
        return features
 
 if __name__ == "__main__":
-    """
-    Quick manual test for FeatureExtractor.
-    Run from project root with:
-        python -m backend.features.feature_extractor
-    """
+    # Quick manual test. From project root:
+    #   python -m backend.features.feature_extractor
 
-# 1) Build a synthetic batch with mouse moves, clicks, and keys
-batch = {
-    "mouseMoves": [
-        {"x": 100, "y": 200, "ts": 1000},
-        {"x": 120, "y": 210, "ts": 1100},
-        {"x": 140, "y": 220, "ts": 1300},
-    ],
-    "clicks": [
-        {"ts": 1050, "button": 0},
-        {"ts": 1600, "button": 0},
-        {"ts": 1900, "button": 2},
-    ],
-    "keys": [
-        {"code": "KeyH", "ts": 1020},
-        {"code": "KeyE", "ts": 1080},
-        {"code": "KeyL", "ts": 1160},
-        {"code": "KeyL", "ts": 1230},
-        {"code": "KeyO", "ts": 1350},
-    ],
-}
+    def _print_features(title: str, batch: dict, extractor: FeatureExtractor) -> None:
+        print(f"\n=== {title} ===")
+        feats = extractor.extractBatchFeatures(batch)
+        for k in sorted(feats.keys()):
+            print(f"{k}: {feats[k]}")
 
-# 2) Create extractor and compute features
-extractor = FeatureExtractor()
-feats = extractor.extractBatchFeatures(batch)
+    batch_straight_line = {
+        "mouseMoves": [
+            {"x": 100, "y": 200, "ts": 1000},
+            {"x": 120, "y": 210, "ts": 1100},
+            {"x": 140, "y": 220, "ts": 1300},
+        ],
+        "clicks": [
+            {"ts": 1050, "button": 0},
+            {"ts": 1600, "button": 0},
+            {"ts": 1900, "button": 2},
+        ],
+        "keys": [
+            {"code": "KeyH", "ts": 1020},
+            {"code": "KeyE", "ts": 1080},
+            {"code": "KeyL", "ts": 1160},
+            {"code": "KeyL", "ts": 1230},
+            {"code": "KeyO", "ts": 1350},
+        ],
+    }
 
-# 3) Pretty‑print features sorted by name
-for k in sorted(feats.keys()):
-    print(f"{k}: {feats[k]}")
+    # Curved path + ~1.2s micro-movement stretch (distances < pauseDistThresh) then a long jump.
+    # Exercises path efficiency, angular variance, and pause detection vs. the straight demo above.
+    batch_curved_with_pause = {
+        "mouseMoves": [
+            {"x": 50, "y": 50, "ts": 10_000},
+            {"x": 51, "y": 50, "ts": 10_400},
+            {"x": 52, "y": 51, "ts": 10_800},
+            {"x": 51, "y": 50, "ts": 11_200},
+            {"x": 200, "y": 200, "ts": 11_300},
+            {"x": 200, "y": 360, "ts": 11_550},
+            {"x": 70, "y": 360, "ts": 11_800},
+            {"x": 70, "y": 100, "ts": 12_050},
+        ],
+        "clicks": [
+            {"ts": 10_200, "button": 0},
+            {"ts": 11_400, "button": 0},
+            {"ts": 11_950, "button": 1},
+        ],
+        "keys": [
+            {"code": "KeyA", "ts": 10_100},
+            {"code": "KeyS", "ts": 10_350},
+            {"code": "KeyD", "ts": 10_600},
+            {"code": "KeyF", "ts": 11_000},
+            {"code": "Digit1", "ts": 11_500},
+            {"code": "Digit2", "ts": 11_650},
+        ],
+    }
+
+    extractor = FeatureExtractor()
+    _print_features("Synthetic: short straight trace (baseline)", batch_straight_line, extractor)
+    _print_features("Synthetic: curved path + dwell / micro-moves", batch_curved_with_pause, extractor)
+    print("\n--- demo finished (2 batches) ---\n")

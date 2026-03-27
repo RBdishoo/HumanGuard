@@ -12,13 +12,11 @@ Signal Collector Module
     saveSignalBatch() appends one batch of signals to the file
     getBatchCount() returns total batches collected
     getSessionCount() returns unique session count
-    getLatestSignal() gets the most recent signals for debugging
+    getLatestSignals() gets the most recent batches for debugging
 """
 
 import json
-import os
-from datetime import datetime
-from utils.helpers import getSignalsFile, formatTimestamp
+from utils.helpers import formatTimestamp
 from pathlib import Path
 
 baseDirectory = Path(__file__).parent.parent #backend/
@@ -27,8 +25,7 @@ signalsFile = baseDirectory / "data" / "raw" / "signals.jsonl"
 class SignalCollector:
 
     """
-    Manages the storage of user behavioral signals. These signals are stored in JSON Lines formate (one JSON object per line).
-    It's thread-safe for concurrent writes from multiple users
+    Manages the storage of user behavioral signals. These signals are stored in JSON Lines format (one JSON object per line).
 
     """
 
@@ -42,7 +39,7 @@ class SignalCollector:
         self.ensureFileExists()
 
     def ensureFileExists(self):
-        """Create signals.json1 file if it doesn't exist"""
+        """Create signals.jsonl file if it doesn't exist"""
         path = Path(self.signalsFile)
         path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists():
@@ -84,9 +81,9 @@ class SignalCollector:
                     data = json.loads(line)
                     sessions.add(data.get('sessionID'))
             return len(sessions)
-        except Exceptions as e:
+        except Exception as e:
             print(f"Error counting sessions: {e}")
-        return 0
+            return 0
 
     def getLatestSignals(self, limit=10):
         """Get the most recent signal batches, useful for debugging and seeing what's being collected."""
@@ -99,7 +96,7 @@ class SignalCollector:
             for line in allLines[-limit:]:
                 signals.append(json.loads(line))
 
-            return signal
+            return signals
         except Exception as e:
             print(f"Error retrieving signals: {e}")
             return []

@@ -40,15 +40,19 @@ class SignalDataLoader:
                         invalidCount += 1
                         continue
 
+                    meta = record.get("metadata", {}) or {}
+                    # Accept legacy typo from older tracker.js (viewerport*)
+                    vw = meta.get("viewportWidth") or meta.get("viewerportWidth")
+                    vh = meta.get("viewportHeight") or meta.get("viewerportHeight")
                     flat = {
                         "sessionID": record.get("sessionID"),
                         "timestamp": record.get("timestamp"),
                         "mouseMoves": record.get("signals", {}).get("mouseMoves", []),
                         "clicks": record.get("signals", {}).get("clicks", []),
                         "keys": record.get("signals", {}).get("keys", []),
-                        "userAgent": record.get("metadata", {}).get("userAgent"),
-                        "viewportWidth": record.get("metadata", {}).get("viewportWidth"),
-                        "viewportHeight": record.get("metadata", {}).get("viewportHeight"),
+                        "userAgent": meta.get("userAgent"),
+                        "viewportWidth": vw,
+                        "viewportHeight": vh,
                     }
                     data.append(flat)
                 except json.JSONDecodeError as e:

@@ -22,7 +22,7 @@ const signalsBuffer = {
 //Collect mouse moves (throttled)
 let lastMoveTime = 0;
 document.addEventListener("mousemove", (e) => {
-    const now = Date.now
+    const now = Date.now();
     if (now - lastMoveTime < 100) return; //record at most every 100 ms
     lastMoveTime = now;
 
@@ -75,8 +75,8 @@ document.addEventListener("keydown", (e) =>{
         signals: payloadSignals,
         metadata: {
             userAgent: navigator.userAgent,
-            viewerportWidth: window.innerWidth,
-            viewerportHeight: window.innerHeight,
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
         },
     };
 
