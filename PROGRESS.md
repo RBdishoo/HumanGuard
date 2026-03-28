@@ -76,14 +76,6 @@ Building a bot detection system in phases. This log tracks progress, learnings, 
 | Styling | Plain CSS (no Tailwind) | Understand core skills |
 | ML Framework | Scikit-learn primary | Interpretability |
 
----
-
-## Interview Talking Points (Updated Weekly)
-
-### Week 1
-- "Set up a complete Python environment from scratch"
-- "Structured project for scalability (backend/frontend/data separation)"
-- "Created .gitignore to keep repo clean"
 
 ---
 
