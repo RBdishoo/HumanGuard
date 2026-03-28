@@ -128,12 +128,12 @@ def save_signal_batch(batch_data):
         release_connection(conn)
 
 
-def save_prediction(session_id, prob_bot, label, threshold):
+def save_prediction(session_id, prob_bot, label, threshold, scoring_type="batch"):
     """Insert a prediction row."""
     execute_query(
-        """INSERT INTO predictions (session_id, prob_bot, label, threshold)
-           VALUES (%s, %s, %s, %s)""",
-        (session_id, prob_bot, label, threshold),
+        """INSERT INTO predictions (session_id, prob_bot, label, threshold, scoring_type)
+           VALUES (%s, %s, %s, %s, %s)""",
+        (session_id, prob_bot, label, threshold, scoring_type),
     )
 
 

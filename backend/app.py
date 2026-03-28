@@ -233,38 +233,10 @@ def scoreSignals():
 
         # SHAP explanation — opt-out with ?explain=false
         explain = request.args.get("explain", "true").lower() != "false"
-        explainer = bundle.get("explainer")
-        if explain and explainer is not None:
-            try:
-                shap_values = explainer.shap_values(x_scaled)
-                sv = shap_values[0] if hasattr(shap_values, '__len__') and len(shap_values) > 0 else shap_values
-                # For binary classifiers shap_values may be 2D [n_samples, n_features]
-                if hasattr(sv, 'ndim') and sv.ndim == 2:
-                    sv = sv[0]
-
-                paired = list(zip(feature_names, sv))
-                paired.sort(key=lambda p: abs(p[1]), reverse=True)
-                top_features = [
-                    {"feature": name, "contribution": round(float(val), 4)}
-                    for name, val in paired[:5]
-                ]
-
-                top_name = paired[0][0]
-                top_direction = "high" if paired[0][1] > 0 else "low"
-                interpretation_text = FEATURE_INTERPRETATIONS.get(
-                    top_name, f"unusual value for {top_name}"
-                )
-                if label == "bot":
-                    interpretation = f"Session flagged as bot due to {interpretation_text}."
-                else:
-                    interpretation = f"Session classified as human; top signal: {interpretation_text}."
-
-                response["explanation"] = {
-                    "top_features": top_features,
-                    "interpretation": interpretation,
-                }
-            except Exception as exc:
-                logger.warning("SHAP explanation failed: %s", exc)
+        if explain:
+            explanation = _build_shap_explanation(bundle, x_scaled, label)
+            if explanation is not None:
+                response["explanation"] = explanation
 
         return jsonify(response), 200
 
@@ -273,6 +245,183 @@ def scoreSignals():
     except Exception as e:
         logger.exception("Error scoring signals")
         return jsonify({"Error": f"Server error: {str(e)}"}), 500
+
+def _load_session_batches(session_id):
+    """
+    Load all signal batches for a given sessionID from signals.jsonl.
+    Returns a list of signal dicts (the 'signals' sub-object from each batch).
+    """
+    batches = []
+    signals_path = collector.getSignalsFile()
+    if not os.path.exists(signals_path):
+        return batches
+    with open(signals_path, "r") as f:
+        for line in f:
+            try:
+                record = json.loads(line.strip())
+                if record.get("sessionID") == session_id:
+                    batches.append(record.get("signals") or {})
+            except (json.JSONDecodeError, Exception):
+                continue
+    return batches
+
+
+def _score_single_batch(bundle, signals_dict):
+    """Score a single signals dict, return prob_bot and the scaled feature vector."""
+    import numpy as np
+    feature_names = bundle["feature_names"]
+    feats = bundle["extractor"].extractBatchFeatures(signals_dict)
+    x_row = [float(feats.get(name, 0.0)) for name in feature_names]
+    x = np.array([x_row], dtype=float)
+    x_scaled = bundle["scaler"].transform(x)
+    prob_bot = float(bundle["model"].predict_proba(x_scaled)[0, 1])
+    return prob_bot, x_scaled
+
+
+def _compute_trend(scores):
+    """Determine if bot probability is increasing, decreasing, or stable."""
+    if len(scores) < 2:
+        return "stable"
+    import numpy as np
+    x = np.arange(len(scores), dtype=float)
+    slope = np.polyfit(x, scores, 1)[0]
+    if slope > 0.02:
+        return "increasing"
+    elif slope < -0.02:
+        return "decreasing"
+    return "stable"
+
+
+def _build_shap_explanation(bundle, x_scaled, label):
+    """Build SHAP explanation block for a single scaled feature vector."""
+    explainer = bundle.get("explainer")
+    if explainer is None:
+        return None
+    try:
+        feature_names = bundle["feature_names"]
+        shap_values = explainer.shap_values(x_scaled)
+        sv = shap_values[0] if hasattr(shap_values, '__len__') and len(shap_values) > 0 else shap_values
+        if hasattr(sv, 'ndim') and sv.ndim == 2:
+            sv = sv[0]
+        paired = list(zip(feature_names, sv))
+        paired.sort(key=lambda p: abs(p[1]), reverse=True)
+        top_features = [
+            {"feature": name, "contribution": round(float(val), 4)}
+            for name, val in paired[:5]
+        ]
+        top_name = paired[0][0]
+        interpretation_text = FEATURE_INTERPRETATIONS.get(
+            top_name, f"unusual value for {top_name}"
+        )
+        if label == "bot":
+            interpretation = f"Session flagged as bot due to {interpretation_text}."
+        else:
+            interpretation = f"Session classified as human; top signal: {interpretation_text}."
+        return {"top_features": top_features, "interpretation": interpretation}
+    except Exception as exc:
+        logger.warning("SHAP explanation failed: %s", exc)
+        return None
+
+
+def _session_score_logic(session_id):
+    """
+    Core session-level scoring logic shared by POST and GET routes.
+    Returns (response_dict, status_code).
+    """
+    import numpy as np
+
+    try:
+        batches = _load_session_batches(session_id)
+        batch_count = len(batches)
+
+        if batch_count < 2:
+            return {
+                "error": "Insufficient data",
+                "message": "Session requires at least 2 batches for session-level scoring",
+                "batch_count": batch_count,
+            }, 400
+
+        bundle = _load_scoring_bundle()
+        threshold = float(bundle["threshold"])
+
+        batch_scores = []
+        batch_x_scaled = []
+        for signals_dict in batches:
+            prob, x_sc = _score_single_batch(bundle, signals_dict)
+            batch_scores.append(prob)
+            batch_x_scaled.append(x_sc)
+
+        # Weighted average — linear weights giving later batches higher weight
+        weights = np.arange(1, batch_count + 1, dtype=float)
+        session_prob_bot = float(np.average(batch_scores, weights=weights))
+        label = "bot" if session_prob_bot >= threshold else "human"
+
+        # Drift analysis
+        scores_arr = np.array(batch_scores)
+        drift = {
+            "trend": _compute_trend(batch_scores),
+            "drift_score": round(float(np.std(scores_arr)), 4),
+            "max_prob_bot": round(float(np.max(scores_arr)), 4),
+            "mean_prob_bot": round(float(np.mean(scores_arr)), 4),
+        }
+
+        # Save to PostgreSQL if available
+        try:
+            from db.db_client import is_available as db_available, save_prediction
+            if db_available():
+                save_prediction(session_id, session_prob_bot, label, threshold, scoring_type="session")
+        except Exception as exc:
+            logger.warning("Failed to save session prediction to PostgreSQL: %s", exc)
+
+        response = {
+            "success": True,
+            "sessionID": session_id,
+            "session_prob_bot": round(session_prob_bot, 4),
+            "label": label,
+            "threshold": threshold,
+            "batch_count": batch_count,
+            "batch_scores": [round(s, 4) for s in batch_scores],
+            "drift": drift,
+        }
+
+        # SHAP explanation for the highest-scoring batch
+        peak_idx = int(np.argmax(scores_arr))
+        explanation = _build_shap_explanation(bundle, batch_x_scaled[peak_idx], label)
+        if explanation is not None:
+            explanation["source_batch"] = peak_idx
+            response["explanation"] = explanation
+
+        return response, 200
+
+    except FileNotFoundError as e:
+        return {"Error": str(e)}, 503
+    except Exception as e:
+        logger.exception("Error in session scoring")
+        return {"Error": f"Server error: {str(e)}"}, 500
+
+
+@app.route('/api/session-score', methods=['POST'])
+def sessionScore():
+    """
+    POST /api/session-score
+    Session-level bot scoring — aggregates all batches for a sessionID.
+    """
+    data = request.get_json(silent=True)
+    if not data or "sessionID" not in data:
+        return jsonify({"error": "Missing sessionID"}), 400
+    response, status = _session_score_logic(data["sessionID"])
+    return jsonify(response), status
+
+
+@app.route('/api/session-score/<session_id>', methods=['GET'])
+def sessionScoreGet(session_id):
+    """
+    GET /api/session-score/<sessionID>
+    Convenience alias for session-level scoring.
+    """
+    response, status = _session_score_logic(session_id)
+    return jsonify(response), status
+
 
 @app.route('/api/stats', methods=['GET'])
 def getStats():

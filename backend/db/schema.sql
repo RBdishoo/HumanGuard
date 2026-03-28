@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     prob_bot        DOUBLE PRECISION NOT NULL,
     label           VARCHAR(10) NOT NULL,
     threshold       DOUBLE PRECISION NOT NULL,
+    scoring_type    VARCHAR(10) NOT NULL DEFAULT 'batch' CHECK (scoring_type IN ('batch', 'session')),
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 

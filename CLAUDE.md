@@ -69,6 +69,10 @@ POST /api/signals — Submit a signal batch
 
 POST /api/score — Score a signal batch (returns bot probability + SHAP explanation). Caps input at 5000 mouse moves, 2000 clicks, 5000 keystrokes. Pass ?explain=false to skip SHAP computation for lower latency
 
+POST /api/session-score — Session-level scoring: aggregates all batches for a sessionID, returns weighted prob_bot, per-batch scores, drift analysis, and SHAP explanation for peak batch
+
+GET /api/session-score/<sessionID> — Convenience GET alias for session-level scoring
+
 GET /api/stats — Signal collection statistics
 
 GET /health — Liveness check (status, model name, version, uptime, timestamp). Does not load model artifacts
