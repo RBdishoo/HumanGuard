@@ -11,45 +11,39 @@ Building a bot detection system in phases. This log tracks progress, learnings, 
 - [x] Environment setup (Python, venv, packages)
 - [x] Git repository initialized
 - [x] Project structure created
-- [ ] Flask server running
-- [ ] Frontend demo page working
-- [ ] Data being saved to JSON
+- [x] Flask server running
+- [x] Frontend demo page working
+- [x] Data being saved to JSON
 
-### Learnings This Week
-(Will update as you progress)
-
-### Blockers
-(None yet)
 
 ## Phase 2: Feature Engineering
 **Timeline**: Feb 3 - Feb 17, 2026 (2 weeks)
 **Goal**: Extract meaningful features from signals
 
 ### Tasks
-- [ ] Implement mouse linearity calculation
-- [ ] Implement keystroke timing analysis
-- [ ] Implement session-level features
-- [ ] Document why each feature matters
+- [x] Implement mouse linearity calculation
+- [x] Implement keystroke timing analysis
+- [x] Implement session-level features
+- [x] Document why each feature matters
 
 ## Phase 3: Data Collection & Labeling
 **Timeline**: Feb 17 - Mar 3, 2026 (2 weeks)
 **Goal**: Labeled dataset of humans vs bots
 
 ### Tasks
-- [ ] Collect human baseline data (100+ sessions)
-- [ ] Create bot simulations (5+ variations)
-- [ ] Label dataset (1 = bot, 0 = human)
+- [x] Collect human baseline data (100+ sessions)
+- [x] Create bot simulations (5+ variations)
+- [x] Label dataset (1 = bot, 0 = human)
 
 ## Phase 4: ML Model Training
 **Timeline**: Mar 3 - Mar 24, 2026 (3 weeks)
 **Goal**: Trained classifier (87%+ accuracy)
 
 ### Tasks
-- [ ] Baseline model (rule-based)
-- [ ] Logistic Regression
-- [ ] Random Forest
-- [ ] Neural Network (optional)
-- [ ] Model comparison & selection
+- [x] Baseline model (rule-based)
+- [x] Logistic Regression
+- [x] Random Forest
+- [x] Model comparison & selection
 
 ## Phase 5: Deployment & Monitoring
 **Timeline**: Mar 24 - Apr 7, 2026 (2 weeks)
