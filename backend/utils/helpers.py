@@ -44,7 +44,7 @@ def formatTimestamp():
 def isValidSignalBatch(data):
 
     "Validate that incoming signal batch has required fields"
-    requiredFields = ['sessionID', 'signals', 'metadata']
+    requiredFields = ['sessionID', 'signals']
     if not all(field in data for field in requiredFields):
         return False
     

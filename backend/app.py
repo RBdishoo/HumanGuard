@@ -42,6 +42,7 @@ activeSessions = set()
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models" / "trained"
 MODEL_NAME = "XGBoost"
+PREDICTIONS_LOG = Path(__file__).resolve().parent / "data" / "predictions_log.jsonl"
 
 _scoring_bundle = None
 _server_start_time = None
@@ -152,6 +153,29 @@ def _load_scoring_bundle():
     return _scoring_bundle
 
 
+def _log_prediction_local(session_id, prob_bot, label, threshold,
+                          scoring_type="batch", response_time_ms=None, explanation=None):
+    """Append a prediction entry to the local JSONL log for dashboard fallback."""
+    entry = {
+        "sessionID": session_id,
+        "prob_bot": prob_bot,
+        "label": label,
+        "threshold": threshold,
+        "scoring_type": scoring_type,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if response_time_ms is not None:
+        entry["response_time_ms"] = response_time_ms
+    if explanation is not None:
+        entry["explanation"] = explanation
+    try:
+        PREDICTIONS_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(PREDICTIONS_LOG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as exc:
+        logger.warning("Failed to write prediction log: %s", exc)
+
+
 @app.route('/api/score', methods=['POST'])
 def scoreSignals():
     """
@@ -198,6 +222,7 @@ def scoreSignals():
                 }
             }), 413
 
+        _score_start = time.time()
         bundle = _load_scoring_bundle()
         feature_names = bundle["feature_names"]
 
@@ -237,6 +262,14 @@ def scoreSignals():
             explanation = _build_shap_explanation(bundle, x_scaled, label)
             if explanation is not None:
                 response["explanation"] = explanation
+
+        _response_time_ms = round((time.time() - _score_start) * 1000, 1)
+        _log_prediction_local(
+            data.get("sessionID"), prob_bot, label, float(bundle["threshold"]),
+            scoring_type="batch",
+            response_time_ms=_response_time_ms,
+            explanation=response.get("explanation"),
+        )
 
         return jsonify(response), 200
 
@@ -391,6 +424,12 @@ def _session_score_logic(session_id):
             explanation["source_batch"] = peak_idx
             response["explanation"] = explanation
 
+        _log_prediction_local(
+            session_id, session_prob_bot, label, threshold,
+            scoring_type="session",
+            explanation=response.get("explanation"),
+        )
+
         return response, 200
 
     except FileNotFoundError as e:
@@ -518,6 +557,144 @@ def health():
         "uptime_seconds": round(now - start, 3),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }), 200
+
+
+def _dashboard_stats_from_log(threshold):
+    """Build dashboard stats by reading predictions_log.jsonl."""
+    records = []
+    if PREDICTIONS_LOG.exists():
+        with open(PREDICTIONS_LOG, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except Exception:
+                    continue
+
+    total = len(records)
+    bot_count = sum(1 for r in records if r.get("label") == "bot")
+    human_count = total - bot_count
+    bot_rate = round(bot_count / total, 4) if total > 0 else 0.0
+
+    times = [r["response_time_ms"] for r in records if "response_time_ms" in r]
+    avg_response_time_ms = round(sum(times) / len(times), 1) if times else 0.0
+
+    # Last 10, most-recent-first
+    recent_raw = records[-10:][::-1]
+    recent_predictions = [
+        {
+            "sessionID": r.get("sessionID"),
+            "prob_bot": r.get("prob_bot"),
+            "label": r.get("label"),
+            "timestamp": r.get("timestamp"),
+            "scoring_type": r.get("scoring_type", "batch"),
+        }
+        for r in recent_raw
+    ]
+
+    # Top 5 flagged features from SHAP data of bot detections
+    feature_counts: dict = {}
+    for r in records:
+        if r.get("label") == "bot":
+            for feat in ((r.get("explanation") or {}).get("top_features") or []):
+                name = feat.get("feature")
+                if name:
+                    feature_counts[name] = feature_counts.get(name, 0) + 1
+    top_flagged_features = sorted(feature_counts, key=lambda k: feature_counts[k], reverse=True)[:5]
+
+    return {
+        "total_predictions": total,
+        "bot_count": bot_count,
+        "human_count": human_count,
+        "bot_rate": bot_rate,
+        "avg_response_time_ms": avg_response_time_ms,
+        "recent_predictions": recent_predictions,
+        "top_flagged_features": top_flagged_features,
+        "model": MODEL_NAME,
+        "threshold": threshold,
+    }
+
+
+def _dashboard_stats_from_pg(threshold):
+    """Build dashboard stats from PostgreSQL predictions table."""
+    from db.db_client import execute_query
+
+    cur = execute_query(
+        "SELECT COUNT(*), SUM(CASE WHEN label='bot' THEN 1 ELSE 0 END) FROM predictions",
+        commit=False,
+    )
+    row = cur.fetchone()
+    total = int(row[0] or 0)
+    bot_count = int(row[1] or 0)
+    human_count = total - bot_count
+    bot_rate = round(bot_count / total, 4) if total > 0 else 0.0
+
+    cur = execute_query(
+        "SELECT session_id, prob_bot, label, created_at, scoring_type "
+        "FROM predictions ORDER BY created_at DESC LIMIT 10",
+        commit=False,
+    )
+    rows = cur.fetchall()
+    recent_predictions = [
+        {
+            "sessionID": r[0],
+            "prob_bot": float(r[1]),
+            "label": r[2],
+            "timestamp": r[3].isoformat() if r[3] else None,
+            "scoring_type": r[4],
+        }
+        for r in rows
+    ]
+
+    return {
+        "total_predictions": total,
+        "bot_count": bot_count,
+        "human_count": human_count,
+        "bot_rate": bot_rate,
+        "avg_response_time_ms": 0.0,
+        "recent_predictions": recent_predictions,
+        "top_flagged_features": [],
+        "model": MODEL_NAME,
+        "threshold": threshold,
+    }
+
+
+@app.route('/api/dashboard-stats', methods=['GET'])
+def dashboardStats():
+    """
+    GET /api/dashboard-stats
+    Returns aggregated stats for the live dashboard: totals, bot rate,
+    recent predictions, top flagged SHAP features, model info.
+    Reads from PostgreSQL if available, falls back to predictions_log.jsonl.
+    """
+    try:
+        threshold = 0.5
+        try:
+            bundle = _load_scoring_bundle()
+            threshold = float(bundle["threshold"])
+        except Exception:
+            pass
+
+        try:
+            from db.db_client import is_available as db_available
+            if db_available():
+                return jsonify(_dashboard_stats_from_pg(threshold)), 200
+        except Exception as exc:
+            logger.warning("PostgreSQL dashboard stats failed, using log: %s", exc)
+
+        return jsonify(_dashboard_stats_from_log(threshold)), 200
+
+    except Exception as e:
+        logger.exception("Error getting dashboard stats")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/dashboard', methods=['GET'])
+def serveDashboard():
+    """GET /dashboard — Serves the live monitoring dashboard."""
+    return send_from_directory('../frontend', 'dashboard.html')
 
 
 if __name__ == "__main__":

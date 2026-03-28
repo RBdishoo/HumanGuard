@@ -15,6 +15,9 @@ __pycache__/
 *~
 
 # Data files (don't commit raw data)
+backend/data/raw/*.jsonl
+backend/data/raw/*.csv
+backend/data/predictions_log.jsonl
 data/raw/signals.jsonl
 data/raw/*.jsonl
 data/processed/

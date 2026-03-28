@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HumanGuard Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 14px;
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid #30363d;
+    }
+    .header h1 {
+      font-size: 20px;
+      color: #58a6ff;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+    .header-right { text-align: right; }
+    .last-updated-label { font-size: 11px; color: #484f58; text-transform: uppercase; letter-spacing: 1px; }
+    .last-updated-val { font-size: 12px; color: #8b949e; margin-top: 2px; }
+
+    /* ── Stats Bar ── */
+    .stats-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .stat-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 16px 18px;
+    }
+    .stat-card .card-label {
+      font-size: 10px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+    }
+    .stat-card .card-value {
+      font-size: 28px;
+      font-weight: bold;
+      color: #c9d1d9;
+      line-height: 1;
+    }
+    .stat-card .card-value.red   { color: #f85149; }
+    .stat-card .card-value.blue  { color: #58a6ff; }
+    .stat-card .card-value.small { font-size: 18px; }
+
+    /* ── Main two-column grid ── */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    /* ── Section card ── */
+    .section {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 16px;
+    }
+    .section h2 {
+      font-size: 10px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 14px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #21262d;
+    }
+
+    /* ── Feed ── */
+    .feed-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 0;
+      border-bottom: 1px solid #21262d;
+      font-size: 12px;
+    }
+    .feed-row:last-child { border-bottom: none; }
+    .feed-session {
+      width: 100px;
+      color: #8b949e;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .prob-bar-wrap {
+      flex: 1;
+      height: 8px;
+      background: #21262d;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .prob-bar {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.4s ease;
+    }
+    .prob-val {
+      width: 38px;
+      text-align: right;
+      color: #8b949e;
+      flex-shrink: 0;
+    }
+    .badge {
+      font-size: 9px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      font-weight: bold;
+      flex-shrink: 0;
+    }
+    .badge.bot   { background: #3d1c1c; color: #f85149; }
+    .badge.human { background: #1c3d2a; color: #3fb950; }
+    .feed-ts {
+      font-size: 10px;
+      color: #484f58;
+      width: 64px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    /* ── Canvas ── */
+    canvas { display: block; }
+
+    /* ── Feature bars ── */
+    .feat-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      font-size: 12px;
+    }
+    .feat-row:last-child { margin-bottom: 0; }
+    .feat-name {
+      width: 220px;
+      color: #8b949e;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .feat-bar-wrap {
+      flex: 1;
+      height: 12px;
+      background: #21262d;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .feat-bar {
+      height: 100%;
+      background: #388bfd;
+      border-radius: 4px;
+      transition: width 0.4s ease;
+    }
+    .feat-rank {
+      width: 28px;
+      text-align: right;
+      color: #484f58;
+      flex-shrink: 0;
+    }
+
+    .empty-msg {
+      color: #484f58;
+      font-size: 12px;
+      text-align: center;
+      padding: 24px 0;
+    }
+
+    @media (max-width: 900px) {
+      .stats-bar { grid-template-columns: repeat(2, 1fr); }
+      .main-grid { grid-template-columns: 1fr; }
+      .feat-name { width: 140px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- A) Header -->
+  <div class="header">
+    <h1>HumanGuard Dashboard</h1>
+    <div class="header-right">
+      <div class="last-updated-label">Last updated</div>
+      <div class="last-updated-val" id="lastUpdated">—</div>
+    </div>
+  </div>
+
+  <!-- B) Stats Bar -->
+  <div class="stats-bar">
+    <div class="stat-card">
+      <div class="card-label">Total Predictions</div>
+      <div class="card-value" id="statTotal">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="card-label">Bot Rate</div>
+      <div class="card-value red" id="statBotRate">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="card-label">Avg Response Time</div>
+      <div class="card-value blue" id="statAvgTime">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="card-label">Model</div>
+      <div class="card-value small" id="statModel">—</div>
+    </div>
+  </div>
+
+  <!-- C+D) Main Grid: Feed + Chart -->
+  <div class="main-grid">
+
+    <!-- C) Live Prediction Feed -->
+    <div class="section">
+      <h2>Live Prediction Feed</h2>
+      <div id="predFeed"><div class="empty-msg">No predictions yet</div></div>
+    </div>
+
+    <!-- D) Drift Chart -->
+    <div class="section" id="chartSection">
+      <h2>Prob Bot Drift — last 20 predictions</h2>
+      <canvas id="driftCanvas" height="200"></canvas>
+    </div>
+
+  </div>
+
+  <!-- E) Feature Importance -->
+  <div class="section">
+    <h2>Top Flagged Features — Bot Detections (SHAP)</h2>
+    <div id="featImportance"><div class="empty-msg">No bot detections with SHAP data yet</div></div>
+  </div>
+
+  <script>
+    const REFRESH_MS = 10000;
+    let _lastData = null;
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    function fmtTime(iso) {
+      if (!iso) return '—';
+      try {
+        return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      } catch (_) { return '—'; }
+    }
+
+    function probColor(p) {
+      if (p >= 0.7) return '#f85149';
+      if (p >= 0.3) return '#d29922';
+      return '#3fb950';
+    }
+
+    // ── Stats Bar ─────────────────────────────────────────────────────────
+
+    function renderStats(data) {
+      document.getElementById('statTotal').textContent = data.total_predictions ?? '—';
+      document.getElementById('statBotRate').textContent =
+        typeof data.bot_rate === 'number' ? (data.bot_rate * 100).toFixed(1) + '%' : '—';
+      document.getElementById('statAvgTime').textContent =
+        data.avg_response_time_ms ? data.avg_response_time_ms.toFixed(1) + ' ms' : '—';
+      document.getElementById('statModel').textContent = data.model || '—';
+      document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+    }
+
+    // ── Live Feed ─────────────────────────────────────────────────────────
+
+    function renderFeed(preds) {
+      const el = document.getElementById('predFeed');
+      if (!preds || preds.length === 0) {
+        el.innerHTML = '<div class="empty-msg">No predictions yet</div>';
+        return;
+      }
+      el.innerHTML = preds.map(p => {
+        const sid = p.sessionID ? p.sessionID.substring(0, 10) + '\u2026' : 'unknown';
+        const prob = typeof p.prob_bot === 'number' ? p.prob_bot : 0;
+        const barPct = Math.round(prob * 100);
+        const col = probColor(prob);
+        const badgeCls = p.label === 'bot' ? 'bot' : 'human';
+        const badgeTxt = p.label === 'bot' ? 'BOT' : 'HUMAN';
+        return `<div class="feed-row">
+          <span class="feed-session" title="${p.sessionID || ''}">${sid}</span>
+          <div class="prob-bar-wrap">
+            <div class="prob-bar" style="width:${barPct}%;background:${col}"></div>
+          </div>
+          <span class="prob-val">${prob.toFixed(2)}</span>
+          <span class="badge ${badgeCls}">${badgeTxt}</span>
+          <span class="feed-ts">${fmtTime(p.timestamp)}</span>
+        </div>`;
+      }).join('');
+    }
+
+    // ── Drift Chart ───────────────────────────────────────────────────────
+
+    function renderDriftChart(preds, threshold) {
+      const canvas = document.getElementById('driftCanvas');
+      const section = document.getElementById('chartSection');
+      const W = section.clientWidth - 32;  // section padding 16px each side
+      canvas.width = W;
+      const H = canvas.height || 200;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, W, H);
+
+      // Fill background
+      ctx.fillStyle = '#161b22';
+      ctx.fillRect(0, 0, W, H);
+
+      const PAD = { top: 16, right: 16, bottom: 28, left: 40 };
+      const cW = W - PAD.left - PAD.right;
+      const cH = H - PAD.top - PAD.bottom;
+
+      // Use chronological order (feed returns most-recent-first → reverse)
+      const all = preds ? [...preds].reverse() : [];
+      const pts_data = all.slice(-20);
+      const n = pts_data.length;
+
+      // Grid lines + Y labels
+      ctx.font = '10px Courier New';
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= 4; i++) {
+        const v = i / 4;
+        const y = PAD.top + cH * (1 - v);
+        ctx.fillStyle = '#484f58';
+        ctx.fillText(v.toFixed(2), PAD.left - 6, y + 3);
+        ctx.strokeStyle = '#21262d';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(PAD.left, y);
+        ctx.lineTo(PAD.left + cW, y);
+        ctx.stroke();
+      }
+
+      // Threshold line (red dashed)
+      const thr = typeof threshold === 'number' ? threshold : 0.5;
+      const thrY = PAD.top + cH * (1 - thr);
+      ctx.strokeStyle = 'rgba(248,81,73,0.7)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(PAD.left, thrY);
+      ctx.lineTo(PAD.left + cW, thrY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      if (n === 0) {
+        ctx.fillStyle = '#484f58';
+        ctx.font = '12px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText('No data yet', W / 2, H / 2);
+        return;
+      }
+
+      // Compute pixel coords
+      const pts = pts_data.map((p, i) => ({
+        x: PAD.left + (n === 1 ? cW / 2 : (i / (n - 1)) * cW),
+        y: PAD.top + cH * (1 - (p.prob_bot || 0)),
+        label: p.label,
+      }));
+
+      // Line connecting dots
+      ctx.strokeStyle = '#388bfd';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      pts.forEach((pt, i) => i === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y));
+      ctx.stroke();
+
+      // Dots colored by label
+      pts.forEach(pt => {
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = pt.label === 'bot' ? '#f85149' : '#3fb950';
+        ctx.fill();
+      });
+
+      // X axis index labels
+      ctx.fillStyle = '#484f58';
+      ctx.font = '9px Courier New';
+      ctx.textAlign = 'center';
+      const labelStep = n <= 6 ? 1 : Math.ceil(n / 6);
+      pts.forEach((pt, i) => {
+        if (i === 0 || i === n - 1 || i % labelStep === 0) {
+          ctx.fillText(String(i + 1), pt.x, H - 8);
+        }
+      });
+    }
+
+    // ── Feature Importance ────────────────────────────────────────────────
+
+    function renderFeatures(features) {
+      const el = document.getElementById('featImportance');
+      if (!features || features.length === 0) {
+        el.innerHTML = '<div class="empty-msg">No bot detections with SHAP data yet</div>';
+        return;
+      }
+      el.innerHTML = features.map((name, i) => {
+        // Rank 1 = 100%, each subsequent = 15% less (visual only)
+        const barW = Math.max(10, 100 - i * 15);
+        return `<div class="feat-row">
+          <span class="feat-name" title="${name}">${name}</span>
+          <div class="feat-bar-wrap">
+            <div class="feat-bar" style="width:${barW}%"></div>
+          </div>
+          <span class="feat-rank">#${i + 1}</span>
+        </div>`;
+      }).join('');
+    }
+
+    // ── Refresh cycle ─────────────────────────────────────────────────────
+
+    async function refresh() {
+      try {
+        const resp = await fetch('/api/dashboard-stats');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        _lastData = data;
+        renderStats(data);
+        renderFeed(data.recent_predictions);
+        renderDriftChart(data.recent_predictions, data.threshold);
+        renderFeatures(data.top_flagged_features);
+      } catch (e) {
+        console.error('Dashboard refresh error:', e);
+      }
+    }
+
+    async function initModel() {
+      try {
+        const resp = await fetch('/health');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (data.model) document.getElementById('statModel').textContent = data.model;
+      } catch (_) {}
+    }
+
+    window.addEventListener('resize', () => {
+      if (_lastData) renderDriftChart(_lastData.recent_predictions, _lastData.threshold);
+    });
+
+    // Boot
+    refresh();
+    initModel();
+    setInterval(refresh, REFRESH_MS);
+  </script>
+</body>
+</html>

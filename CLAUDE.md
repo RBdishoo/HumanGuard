@@ -77,6 +77,10 @@ GET /api/session-score/<sessionID> — Convenience GET alias for session-level s
 
 GET /api/stats — Signal collection statistics
 
+GET /api/dashboard-stats — Aggregated stats for the live dashboard: total_predictions, bot_count, human_count, bot_rate, avg_response_time_ms, recent_predictions (last 10), top_flagged_features (top 5 SHAP feature names from bot detections), model, threshold. Reads from PostgreSQL if available, falls back to backend/data/predictions_log.jsonl
+
+GET /dashboard — Serves frontend/dashboard.html (live monitoring dashboard)
+
 GET /health — Liveness check (status, model name, version, uptime, timestamp). Does not load model artifacts
 
 GET / — Serves frontend/index.html
@@ -121,8 +125,8 @@ Completed:
 - SHAP explainability — per-prediction top-5 feature attribution with 33-feature interpretation mapping
 - Session-level scoring — drift detection, linearly-weighted batch aggregation, trend analysis
 - scoring_type column in predictions table to distinguish batch vs session scores
-
-Next: Dashboard at GET /dashboard
+- Live dashboard at GET /dashboard — dark-theme canvas chart, live feed, feature importance bars
+- Local predictions log at backend/data/predictions_log.jsonl — always written; used as dashboard fallback when PostgreSQL is unavailable
 
 ### Deployment
 - Dockerfile: python:3.11-slim, PORT=8080, `python -m backend.app`
