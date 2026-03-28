@@ -39,7 +39,7 @@ collector = SignalCollector()
 activeSessions = set()
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models" / "trained"
-MODEL_NAME = "RandomForest"
+MODEL_NAME = "XGBoost"
 
 _scoring_bundle = None
 

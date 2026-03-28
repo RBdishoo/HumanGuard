@@ -1,8 +1,9 @@
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier 
-from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score, confusion_matrix
-import xgboost  as xgb
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
+import xgboost as xgb
 from pathlib import Path
 import json
 import logging
@@ -41,11 +42,11 @@ class ModelTrainer:
         yPredictionProbability = rf.predict_proba(xTest)[:, 1]
 
         metrics = {
-
             'model': 'RandomForest',
             'accuracy': float(accuracy_score(yTest, yPrediction)),
             'precision': float(precision_score(yTest, yPrediction)),
             'recall': float(recall_score(yTest, yPrediction)),
+            'f1': float(f1_score(yTest, yPrediction)),
             'roc_auc': float(roc_auc_score(yTest, yPredictionProbability)),
         }
 
@@ -76,7 +77,7 @@ class ModelTrainer:
         print("\n Training XGBoost")
         xgbModel = xgb.XGBClassifier(
             n_estimators=100,
-            max_depth=5,
+            max_depth=3,
             learning_rate=0.1,
             random_state=42,
             n_jobs=-1,
@@ -87,12 +88,12 @@ class ModelTrainer:
         yPrediction = xgbModel.predict(xTest)
         yPredictionProbability = xgbModel.predict_proba(xTest)[:, 1]
 
-        metrics ={
-
+        metrics = {
             'model': 'XGBoost',
             'accuracy': float(accuracy_score(yTest, yPrediction)),
             'precision': float(precision_score(yTest, yPrediction)),
             'recall': float(recall_score(yTest, yPrediction)),
+            'f1': float(f1_score(yTest, yPrediction)),
             'roc_auc': float(roc_auc_score(yTest, yPredictionProbability)),
         }
 
@@ -103,6 +104,40 @@ class ModelTrainer:
 
         return xgbModel, metrics, featureImportance
     
+    def trainLogisticRegression(self, xTrain, xTest, yTrain, yTest, featureNames):
+        """
+        Train Logistic Regression — a linear model that learns a weighted
+        combination of features to output a probability via the sigmoid function.
+
+        max_iter: maximum iterations for the solver to converge.
+        C: inverse of regularization strength (smaller = stronger regularization).
+        """
+
+        print("\n Training LogisticRegression")
+
+        lr = LogisticRegression(max_iter=1000, C=1.0, random_state=42)
+        lr.fit(xTrain, yTrain)
+
+        yPrediction = lr.predict(xTest)
+        yPredictionProbability = lr.predict_proba(xTest)[:, 1]
+
+        metrics = {
+            'model': 'LogisticRegression',
+            'accuracy': float(accuracy_score(yTest, yPrediction)),
+            'precision': float(precision_score(yTest, yPrediction)),
+            'recall': float(recall_score(yTest, yPrediction)),
+            'f1': float(f1_score(yTest, yPrediction)),
+            'roc_auc': float(roc_auc_score(yTest, yPredictionProbability)),
+        }
+
+        # Coefficient magnitudes as feature importance proxy
+        featureImportance = pd.DataFrame({
+            'feature': featureNames,
+            'importance': np.abs(lr.coef_[0])
+        }).sort_values('importance', ascending=False)
+
+        return lr, metrics, featureImportance
+
     def saveModel(self, model, name: str):
         """Save model with joblib."""
         import joblib
