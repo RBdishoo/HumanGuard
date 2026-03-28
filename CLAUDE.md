@@ -71,6 +71,8 @@ POST /api/score — Score a signal batch (returns bot probability). Caps input a
 
 GET /api/stats — Signal collection statistics
 
+GET /health — Liveness check (status, model name, version, uptime, timestamp). Does not load model artifacts
+
 GET / — Serves frontend/index.html
 
 Trained Model Artifacts (models/trained/)

@@ -19,6 +19,8 @@ import logging
 import os
 import sys
 import json
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Add parent Directory to path so we can import backend modules
@@ -42,6 +44,7 @@ MODEL_DIR = Path(__file__).resolve().parent.parent / "models" / "trained"
 MODEL_NAME = "XGBoost"
 
 _scoring_bundle = None
+_server_start_time = None
 
 
 def _load_scoring_bundle():
@@ -256,6 +259,25 @@ def serveFrontend():
     """
     return send_from_directory('../frontend', 'index.html')
 
+@app.route('/health', methods=['GET'])
+def health():
+    """
+    GET /health - Lightweight liveness check.
+    Does NOT load model artifacts so it always responds, even if
+    models/trained/ is empty.
+    """
+    now = time.time()
+    start = _server_start_time if _server_start_time is not None else now
+    return jsonify({
+        "status": "ok",
+        "model": MODEL_NAME,
+        "version": "1.0.0",
+        "uptime_seconds": round(now - start, 3),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }), 200
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+    _server_start_time = time.time()
     app.run(debug=True, port=int(os.environ.get("PORT", 5050)))
