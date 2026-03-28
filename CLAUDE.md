@@ -19,15 +19,16 @@ pip install -r requirements.txt
 # Run Flask server (serves frontend + API on localhost:5050, configurable via PORT env var)
 python -m backend.app
 
-# Run tests
+# Run tests (53 tests across 8 test files)
 pytest tests/ -v
 pytest tests/test_signals.py          # single test file
 
 # Train model (extracts features from signals.jsonl, trains, saves artifacts)
 python -m models.run_training
 
-# Generate synthetic bot data
-python scripts/seed_bot_session.py
+# Generate synthetic data
+python scripts/seed_bot_session.py           # bot sessions (--stealthy flag for evasive bots)
+python scripts/seed_human_session.py         # human sessions
 
 # Validate trained model
 python scripts/report_training_summary.py
@@ -35,19 +36,20 @@ python scripts/report_training_summary.py
 
 No linter or formatter is currently configured.
 
-Architecture
-Data Flow
+## Architecture
+
+### Data Flow
 Frontend (frontend/tracker.js): Vanilla JS captures mouse/click/key events (mouse throttled to 100ms), auto-sends batches every 3 seconds to /api/signals
 
-Signal Collection (backend/collectors/signal_collector.py): Appends signal batches as JSONL to backend/data/raw/signals.jsonl
+Signal Collection (backend/collectors/signal_collector.py): Appends signal batches as JSONL to backend/data/raw/signals.jsonl, dual-writes to PostgreSQL if available
 
 Feature Engineering (backend/features/): Extracts 33 behavioral features (mouse velocity/acceleration/path efficiency, click rate/clustering, keystroke entropy/timing, temporal composites) into CSV
 
-Training (models/): ModelDataset loads features + labels, splits/scales; ModelTrainer trains RandomForest/XGBoost; Evaluator generates reports
+Training (models/): ModelDataset loads features + labels, splits/scales; ModelTrainer trains RandomForest/LogisticRegression/XGBoost; selects best by ROC-AUC
 
-Inference (/api/score in backend/app.py): Lazy-loads trained model artifacts from models/trained/, extracts features from submitted signals, returns prob(bot) + label
+Inference (backend/app.py): Lazy-loads trained model artifacts from models/trained/, extracts features from submitted signals, returns prob(bot) + label + SHAP explanation
 
-Key Modules
+### Key Modules
 backend/features/feature_extractor.py — FeatureExtractor class: raw signals → 33 features
 
 backend/features/feature_utils.py — Static math utilities (MouseTrajectoryUtils, KeystrokeUtils)
@@ -64,12 +66,12 @@ models/train.py — ModelTrainer: trains classifiers, saves .pkl artifacts
 
 models/evaluate.py — Evaluator: metrics reports, confusion matrix plots
 
-API Endpoints
+### API Endpoints
 POST /api/signals — Submit a signal batch
 
-POST /api/score — Score a signal batch (returns bot probability + SHAP explanation). Caps input at 5000 mouse moves, 2000 clicks, 5000 keystrokes. Pass ?explain=false to skip SHAP computation for lower latency
+POST /api/score — Score a single signal batch. Returns bot probability, label, and SHAP explanation (top 5 feature contributions with human-readable interpretation). Caps input at 5000 mouse moves, 2000 clicks, 5000 keystrokes. Pass `?explain=false` to skip SHAP computation for lower latency
 
-POST /api/session-score — Session-level scoring: aggregates all batches for a sessionID, returns weighted prob_bot, per-batch scores, drift analysis, and SHAP explanation for peak batch
+POST /api/session-score — Session-level scoring: aggregates all batches for a sessionID, returns linearly-weighted session prob_bot (later batches weighted higher), per-batch scores, drift analysis (trend, drift_score, max/mean prob_bot), and SHAP explanation for the peak batch
 
 GET /api/session-score/<sessionID> — Convenience GET alias for session-level scoring
 
@@ -79,21 +81,21 @@ GET /health — Liveness check (status, model name, version, uptime, timestamp).
 
 GET / — Serves frontend/index.html
 
-Trained Model Artifacts (models/trained/)
-RandomForest.pkl — Trained classifier
+### Trained Model Artifacts (models/trained/)
+XGBoost.pkl — Active classifier (selected by ROC-AUC)
 
 scaler.pkl — StandardScaler for feature normalization
 
-feature_names.json — Ordered feature list (must match extraction order)
+feature_names.json — Ordered 33-feature list (must match extraction order)
 
 threshold.json — Classification threshold (default 0.5)
 
-metrics.json — Training metrics
+model_comparison.json — Full metrics for all three models
 
-⚠️ Never hand-edit these files. Always regenerate via python models/run_training.py.
+⚠️ Never hand-edit these files. Always regenerate via `python -m models.run_training`.
 When adding new features to FeatureExtractor, always re-run training to keep /api/score in sync.
 
-Data Storage
+### Data Storage
 Signal events (mouseMoves, clicks, keys) use `ts` as the timestamp key (milliseconds since epoch).
 The batch-level `timestamp` field is separate ISO-format metadata added by SignalCollector.
 
@@ -110,5 +112,19 @@ Extracted features: backend/data/processed/training_data_batches.csv
 - Production: PostgreSQL via DATABASE_URL env var (AWS RDS)
 - Dual-write: JSONL always written first; PostgreSQL written if available
 - Schema: `backend/db/schema.sql` (sessions, signal_batches, labels, predictions)
+- Predictions table includes `scoring_type` column ('batch' or 'session')
 - Client: `backend/db/db_client.py` — connection pool, is_available() guard
 - To run migration: `python -m backend.db.migrate`
+
+### Phase 6 Progress
+Completed:
+- SHAP explainability — per-prediction top-5 feature attribution with 33-feature interpretation mapping
+- Session-level scoring — drift detection, linearly-weighted batch aggregation, trend analysis
+- scoring_type column in predictions table to distinguish batch vs session scores
+
+Next: Dashboard at GET /dashboard
+
+### Deployment
+- Dockerfile: python:3.11-slim, PORT=8080, `python -m backend.app`
+- AWS deploy script: `scripts/aws_deploy.sh` (ECR + Lambda + API Gateway)
+- Production deps: requirements-prod.txt (includes shap, psycopg2-binary)
