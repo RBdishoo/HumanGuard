@@ -41,14 +41,14 @@ Frontend (frontend/tracker.js): Vanilla JS captures mouse/click/key events (mous
 
 Signal Collection (backend/collectors/signal_collector.py): Appends signal batches as JSONL to backend/data/raw/signals.jsonl
 
-Feature Engineering (backend/features/): Extracts 34 behavioral features (mouse velocity/acceleration/path efficiency, click rate/clustering, keystroke entropy/timing, temporal composites) into CSV
+Feature Engineering (backend/features/): Extracts 33 behavioral features (mouse velocity/acceleration/path efficiency, click rate/clustering, keystroke entropy/timing, temporal composites) into CSV
 
 Training (models/): ModelDataset loads features + labels, splits/scales; ModelTrainer trains RandomForest/XGBoost; Evaluator generates reports
 
 Inference (/api/score in backend/app.py): Lazy-loads trained model artifacts from models/trained/, extracts features from submitted signals, returns prob(bot) + label
 
 Key Modules
-backend/features/feature_extractor.py — FeatureExtractor class: raw signals → 34 features
+backend/features/feature_extractor.py — FeatureExtractor class: raw signals → 33 features
 
 backend/features/feature_utils.py — Static math utilities (MouseTrajectoryUtils, KeystrokeUtils)
 
@@ -67,7 +67,7 @@ models/evaluate.py — Evaluator: metrics reports, confusion matrix plots
 API Endpoints
 POST /api/signals — Submit a signal batch
 
-POST /api/score — Score a signal batch (returns bot probability). Caps input at 5000 mouse moves, 2000 clicks, 5000 keystrokes
+POST /api/score — Score a signal batch (returns bot probability + SHAP explanation). Caps input at 5000 mouse moves, 2000 clicks, 5000 keystrokes. Pass ?explain=false to skip SHAP computation for lower latency
 
 GET /api/stats — Signal collection statistics
 

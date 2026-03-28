@@ -26,7 +26,7 @@ Built the data collection foundation — Flask server, frontend signal capture, 
 ## Phase 2: Feature Engineering ✅
 **Completed**: Feb 17, 2026
 
-Extracted 34 behavioral features from raw signal streams.
+Extracted 33 behavioral features from raw signal streams.
 
 **Feature categories:**
 - **Mouse** — path efficiency (start-to-end vs actual distance), velocity, acceleration, direction changes, pause frequency
@@ -35,7 +35,7 @@ Extracted 34 behavioral features from raw signal streams.
 - **Session** — tab focus ratio, idle periods, temporal composite features
 
 **Key modules:**
-- `backend/features/feature_extractor.py` — `FeatureExtractor.extractBatchFeatures()` → 34-feature dict
+- `backend/features/feature_extractor.py` — `FeatureExtractor.extractBatchFeatures()` → 33-feature dict
 - `backend/features/feature_utils.py` — `MouseTrajectoryUtils`, `KeystrokeUtils` static math helpers
 - `backend/features/dataset_builder.py` — builds batch-level and session-level CSV datasets
 - `backend/features/data_loader.py` — loads and validates JSONL signal files
@@ -90,7 +90,7 @@ XGBoost and RandomForest tied on all threshold-dependent metrics. XGBoost's high
 **Artifacts saved to `models/trained/`:**
 - `XGBoost.pkl` — active classifier
 - `scaler.pkl` — StandardScaler fitted on training data
-- `feature_names.json` — ordered 34-feature list
+- `feature_names.json` — ordered 33-feature list
 - `threshold.json` — classification threshold (default 0.5)
 - `model_comparison.json` — full metrics for all three models
 
@@ -124,7 +124,7 @@ XGBoost and RandomForest tied on all threshold-dependent metrics. XGBoost's high
 | Storage (Phase 1–4) | JSONL | Append-only, no lock contention, human-readable |
 | Storage (Phase 5+) | PostgreSQL | Indexed queries, relational labels, production scale |
 | Frontend | Vanilla JS | No build step, direct DOM access for low-latency signal capture |
-| Feature count | 34 | Covers all behavioral signal types without high-dimensional noise |
+| Feature count | 33 | Covers all behavioral signal types without high-dimensional noise |
 | Active classifier | XGBoost | Best ROC-AUC; superior probability calibration for continuous scoring |
 | Model depth | max_depth=3 | Prevents overfitting on sub-500 sample dataset |
 | Label noise | 10% symmetric | Regularization against clean-label overfitting |

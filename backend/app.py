@@ -46,6 +46,43 @@ MODEL_NAME = "XGBoost"
 _scoring_bundle = None
 _server_start_time = None
 
+# Human-readable explanations for each feature when it contributes to a bot prediction
+FEATURE_INTERPRETATIONS = {
+    "batch_event_count": "unusual total number of events in the batch",
+    "has_mouse_moves": "presence or absence of mouse movement",
+    "has_clicks": "presence or absence of click events",
+    "has_keys": "presence or absence of keystroke events",
+    "mouseMoveCount": "abnormal number of mouse move events",
+    "mouseAvgVelocity": "unusual average mouse movement speed",
+    "mouseStdVelocity": "unusually consistent mouse speed (low variance suggests automation)",
+    "mouseMaxVelocity": "abnormal peak mouse speed",
+    "mousePauseCount": "unusual number of pauses in mouse movement",
+    "mouseAvgPauseDurationMs": "abnormal average pause duration",
+    "mousePathEfficiency": "abnormally linear mouse movement (bot-like path efficiency)",
+    "mouseAngularVelocityStd": "unusually uniform turning angles in mouse path",
+    "mouseHoverTimeRatio": "abnormal time spent hovering",
+    "mouseHoverFrequency": "unusual hover frequency pattern",
+    "clickCount": "abnormal number of clicks",
+    "clickIntervalMeanMs": "unusual average time between clicks",
+    "clickIntervalStdMs": "unusually regular click timing (low variance suggests automation)",
+    "clickIntervalMinMs": "abnormally fast minimum click interval",
+    "clickIntervalMaxMs": "unusual maximum click interval",
+    "clickClusteringRatio": "abnormal click burst pattern",
+    "clickRatePerSec": "unusual click rate per second",
+    "clickLeftRatio": "unusual left-click vs right-click ratio",
+    "keyCount": "abnormal number of keystrokes",
+    "keyInterKeyDelayMeanMs": "unusual average delay between keystrokes",
+    "keyInterKeyDelayStdMs": "unusually regular keystroke timing (low variance suggests automation)",
+    "keyRapidPresses": "high number of rapid key presses (bot-like speed)",
+    "keyEntropy": "low keystroke diversity (repetitive key patterns)",
+    "keyRatePerSec": "unusual typing speed",
+    "batchDurationMs": "abnormal batch duration",
+    "eventRatePerSec": "unusual overall event rate",
+    "signalDiversityEntropy": "low signal type diversity (missing expected event types)",
+    "clickToMoveRatio": "unusual ratio of clicks to mouse movements",
+    "keyToMoveRatio": "unusual ratio of keystrokes to mouse movements",
+}
+
 
 def _load_scoring_bundle():
     """
@@ -92,11 +129,23 @@ def _load_scoring_bundle():
     model = joblib.load(model_path)
     scaler = joblib.load(scaler_path)
 
+    # Load SHAP explainer if shap is installed
+    explainer = None
+    try:
+        import shap
+        explainer = shap.TreeExplainer(model)
+        logger.info("SHAP TreeExplainer loaded successfully")
+    except ImportError:
+        logger.warning("shap not installed — SHAP explanations will be unavailable")
+    except Exception as exc:
+        logger.warning("Failed to create SHAP explainer: %s", exc)
+
     _scoring_bundle = {
         "model": model,
         "scaler": scaler,
         "feature_names": feature_names,
         "threshold": threshold,
+        "explainer": explainer,
         # Keep a single extractor instance to reduce per-request overhead.
         "extractor": FeatureExtractor(),
     }
@@ -174,13 +223,50 @@ def scoreSignals():
         except Exception as exc:
             logger.warning("Failed to save prediction to PostgreSQL: %s", exc)
 
-        return jsonify({
+        response = {
             "success": True,
             "sessionID": data.get("sessionID"),
             "prob_bot": prob_bot,
             "label": label,
             "threshold": float(bundle["threshold"]),
-        }), 200
+        }
+
+        # SHAP explanation — opt-out with ?explain=false
+        explain = request.args.get("explain", "true").lower() != "false"
+        explainer = bundle.get("explainer")
+        if explain and explainer is not None:
+            try:
+                shap_values = explainer.shap_values(x_scaled)
+                sv = shap_values[0] if hasattr(shap_values, '__len__') and len(shap_values) > 0 else shap_values
+                # For binary classifiers shap_values may be 2D [n_samples, n_features]
+                if hasattr(sv, 'ndim') and sv.ndim == 2:
+                    sv = sv[0]
+
+                paired = list(zip(feature_names, sv))
+                paired.sort(key=lambda p: abs(p[1]), reverse=True)
+                top_features = [
+                    {"feature": name, "contribution": round(float(val), 4)}
+                    for name, val in paired[:5]
+                ]
+
+                top_name = paired[0][0]
+                top_direction = "high" if paired[0][1] > 0 else "low"
+                interpretation_text = FEATURE_INTERPRETATIONS.get(
+                    top_name, f"unusual value for {top_name}"
+                )
+                if label == "bot":
+                    interpretation = f"Session flagged as bot due to {interpretation_text}."
+                else:
+                    interpretation = f"Session classified as human; top signal: {interpretation_text}."
+
+                response["explanation"] = {
+                    "top_features": top_features,
+                    "interpretation": interpretation,
+                }
+            except Exception as exc:
+                logger.warning("SHAP explanation failed: %s", exc)
+
+        return jsonify(response), 200
 
     except FileNotFoundError as e:
         return jsonify({"Error": str(e)}), 503

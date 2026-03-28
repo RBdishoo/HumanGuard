@@ -1,0 +1,30 @@
+{
+  "winner": "LogisticRegression",
+  "selection_metric": "roc_auc",
+  "models": [
+    {
+      "model": "RandomForest",
+      "accuracy": 0.9090909090909091,
+      "precision": 0.9166666666666666,
+      "recall": 0.9166666666666666,
+      "f1": 0.9166666666666666,
+      "roc_auc": 0.9031250000000001
+    },
+    {
+      "model": "LogisticRegression",
+      "accuracy": 0.8636363636363636,
+      "precision": 0.8214285714285714,
+      "recall": 0.9583333333333334,
+      "f1": 0.8846153846153846,
+      "roc_auc": 0.9072916666666666
+    },
+    {
+      "model": "XGBoost",
+      "accuracy": 0.8863636363636364,
+      "precision": 0.88,
+      "recall": 0.9166666666666666,
+      "f1": 0.8979591836734694,
+      "roc_auc": 0.8864583333333333
+    }
+  ]
+}
