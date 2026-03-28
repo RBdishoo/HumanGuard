@@ -1,0 +1,7 @@
+.git
+__pycache__
+*.pyc
+venv/
+backend/data/raw/*.jsonl
+.env
+docs/
