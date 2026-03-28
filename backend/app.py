@@ -166,6 +166,14 @@ def scoreSignals():
         prob_bot = float(bundle["model"].predict_proba(x_scaled)[0, 1])
         label = "bot" if prob_bot >= float(bundle["threshold"]) else "human"
 
+        # Save prediction to PostgreSQL if available
+        try:
+            from db.db_client import is_available as db_available, save_prediction
+            if db_available():
+                save_prediction(data.get("sessionID"), prob_bot, label, float(bundle["threshold"]))
+        except Exception as exc:
+            logger.warning("Failed to save prediction to PostgreSQL: %s", exc)
+
         return jsonify({
             "success": True,
             "sessionID": data.get("sessionID"),

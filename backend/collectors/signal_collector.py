@@ -16,8 +16,11 @@ Signal Collector Module
 """
 
 import json
+import logging
 from utils.helpers import formatTimestamp
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 baseDirectory = Path(__file__).parent.parent #backend/
 signalsFile = baseDirectory / "data" / "raw" / "signals.jsonl"
@@ -55,6 +58,14 @@ class SignalCollector:
             #convert to JSON and appent to file (one line per batch)
             with open(self.signalsFile, 'a') as f:
                 f.write(json.dumps(batchData) + '\n')
+
+            # Dual-write to PostgreSQL if available
+            try:
+                from db.db_client import is_available, save_signal_batch
+                if is_available():
+                    save_signal_batch(batchData)
+            except Exception as exc:
+                logger.warning("PostgreSQL write failed (JSONL saved): %s", exc)
 
             return True
         except Exception as e:

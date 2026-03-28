@@ -100,3 +100,11 @@ Labels: backend/data/raw/labels.csv
 Extracted features: backend/data/processed/training_data_batches.csv
 
 .gitignore excludes data/raw/*.jsonl, models/*.pkl, .env
+
+### Database
+- Local dev: JSONL + CSV (no DATABASE_URL needed)
+- Production: PostgreSQL via DATABASE_URL env var (AWS RDS)
+- Dual-write: JSONL always written first; PostgreSQL written if available
+- Schema: `backend/db/schema.sql` (sessions, signal_batches, labels, predictions)
+- Client: `backend/db/db_client.py` — connection pool, is_available() guard
+- To run migration: `python -m backend.db.migrate`
