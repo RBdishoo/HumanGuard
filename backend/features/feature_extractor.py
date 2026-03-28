@@ -285,7 +285,7 @@ class FeatureExtractor:
 
             if len(delays) > 0:
                 features['keyInterKeyDelayMeanMs'] = float(np.mean(delays))
-                features['keyInterKeyDelayStd'] = float(np.std(delays)) if len(delays) > 1 else 0.0
+                features['keyInterKeyDelayStdMs'] = float(np.std(delays)) if len(delays) > 1 else 0.0
 
                 #Rapid presses: delays less than 50 milliseconds (bot-like speed)
                 rapid = np.sum(delays < 50.0)
@@ -293,12 +293,12 @@ class FeatureExtractor:
             
             else:
                 features['keyInterKeyDelayMeanMs'] = 0.0
-                features['keyInterKeyDelayStd'] = 0.0
+                features['keyInterKeyDelayStdMs'] = 0.0
                 features['keyRapidPresses'] = 0.0
 
         else:
             features['keyInterKeyDelayMeanMs'] = 0.0
-            features['keyInterKeyDelayStd'] = 0.0
+            features['keyInterKeyDelayStdMs'] = 0.0
             features['keyRapidPresses'] = 0.0
 
         #Key variety (entropy over key codes)
