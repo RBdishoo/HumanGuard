@@ -24,6 +24,25 @@ IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$REPO_NAME:latest
 API_NAME=humanguard-api
 CLOUDWATCH_ENABLED=true
 SNS_ALERT_EMAIL=${SNS_ALERT_EMAIL:-""}
+DB_MAX_CONNECTIONS=5
+
+# Fetch DATABASE_URL from Secrets Manager (set to empty if secret not yet created)
+DATABASE_URL=""
+if SECRET_JSON=$(aws secretsmanager get-secret-value \
+        --secret-id "humanGuard/rds" \
+        --region "$AWS_REGION" \
+        --query "SecretString" \
+        --output text 2>/dev/null); then
+    DB_HOST=$(echo "$SECRET_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['host'])")
+    DB_PORT=$(echo "$SECRET_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['port'])")
+    DB_NAME=$(echo "$SECRET_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['dbname'])")
+    DB_USER=$(echo "$SECRET_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['username'])")
+    DB_PASS=$(echo "$SECRET_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['password'])")
+    DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+    echo "DATABASE_URL loaded from Secrets Manager."
+else
+    echo "Warning: humanGuard/rds secret not found — Lambda will run without PostgreSQL."
+fi
 
 echo "=== HumanGuard AWS Deployment ==="
 echo "Account:  $AWS_ACCOUNT_ID"
@@ -138,7 +157,7 @@ aws lambda create-function \
     --role "$ROLE_ARN" \
     --memory-size 1024 \
     --timeout 30 \
-    --environment "Variables={PORT=8080,CLOUDWATCH_ENABLED=$CLOUDWATCH_ENABLED,SNS_ALERT_EMAIL=$SNS_ALERT_EMAIL}" \
+    --environment "Variables={PORT=8080,CLOUDWATCH_ENABLED=$CLOUDWATCH_ENABLED,SNS_ALERT_EMAIL=$SNS_ALERT_EMAIL,DATABASE_URL=$DATABASE_URL,DB_MAX_CONNECTIONS=$DB_MAX_CONNECTIONS}" \
     --region "$AWS_REGION"
 echo "Lambda function '$FUNCTION_NAME' created."
 

@@ -159,3 +159,122 @@ def test_prediction_saved_after_score_when_db_available():
     data = json.loads(resp.data)
     assert data["label"] == "bot"
     mock_save_pred.assert_called_once_with("test-session-1", mock.ANY, "bot", 0.5)
+
+
+# -------------------------------------------------------------------
+# DatabaseManager tests (SQLite in-memory backend)
+# -------------------------------------------------------------------
+
+def _sqlite_mgr():
+    """Instantiate a fresh in-memory DatabaseManager."""
+    with mock.patch.dict(os.environ, {"DATABASE_URL": "sqlite:///:memory:"}):
+        from backend.db import DatabaseManager
+        return DatabaseManager()
+
+
+def test_db_manager_empty_stats():
+    """get_stats() returns zeros on an empty database."""
+    mgr = _sqlite_mgr()
+    stats = mgr.get_stats()
+    assert stats["total_predictions"] == 0
+    assert stats["bot_count"] == 0
+    assert stats["human_count"] == 0
+    assert stats["bot_rate"] == 0.0
+
+
+def test_db_manager_save_prediction_bot():
+    """save_prediction stores a bot prediction and get_stats reflects it."""
+    mgr = _sqlite_mgr()
+    mgr.save_prediction("session-abc", 0.9, is_bot=True)
+    stats = mgr.get_stats()
+    assert stats["total_predictions"] == 1
+    assert stats["bot_count"] == 1
+    assert stats["human_count"] == 0
+    assert stats["bot_rate"] == 1.0
+
+
+def test_db_manager_save_prediction_human():
+    """save_prediction stores a human prediction correctly."""
+    mgr = _sqlite_mgr()
+    mgr.save_prediction("session-xyz", 0.1, is_bot=False)
+    stats = mgr.get_stats()
+    assert stats["total_predictions"] == 1
+    assert stats["bot_count"] == 0
+    assert stats["human_count"] == 1
+    assert stats["bot_rate"] == 0.0
+
+
+def test_db_manager_multiple_predictions_stats():
+    """Stats are correct after multiple mixed predictions."""
+    mgr = _sqlite_mgr()
+    mgr.save_prediction("s1", 0.9, is_bot=True)
+    mgr.save_prediction("s2", 0.8, is_bot=True)
+    mgr.save_prediction("s3", 0.2, is_bot=False)
+    stats = mgr.get_stats()
+    assert stats["total_predictions"] == 3
+    assert stats["bot_count"] == 2
+    assert stats["human_count"] == 1
+    assert abs(stats["bot_rate"] - round(2 / 3, 4)) < 1e-6
+
+
+def test_db_manager_get_recent_predictions_order():
+    """get_recent_predictions returns newest first."""
+    mgr = _sqlite_mgr()
+    mgr.save_prediction("s1", 0.9, is_bot=True)
+    mgr.save_prediction("s2", 0.1, is_bot=False)
+    preds = mgr.get_recent_predictions(limit=10)
+    assert len(preds) == 2
+    # Most recent should be "s2" (inserted last)
+    assert preds[0]["session_id"] == "s2"
+    assert preds[1]["session_id"] == "s1"
+
+
+def test_db_manager_get_recent_predictions_limit():
+    """get_recent_predictions respects the limit parameter."""
+    mgr = _sqlite_mgr()
+    for i in range(5):
+        mgr.save_prediction(f"s{i}", 0.5, is_bot=True)
+    preds = mgr.get_recent_predictions(limit=3)
+    assert len(preds) == 3
+
+
+def test_db_manager_save_session_round_trip():
+    """save_session persists a signal batch without errors."""
+    mgr = _sqlite_mgr()
+    batch = {
+        "sessionID": "sess-round-trip",
+        "metadata": {"userAgent": "test-ua", "viewportWidth": 1920, "viewportHeight": 1080},
+        "signals": {"mouseMoves": [{"x": 1, "y": 2, "ts": 100}], "clicks": [], "keys": []},
+        "timestamp": "2024-01-01T00:00:00Z",
+    }
+    # Should not raise
+    mgr.save_session(batch)
+    # Calling again for same session should not raise (ON CONFLICT DO NOTHING)
+    mgr.save_session(batch)
+
+
+def test_db_manager_get_recent_predictions_fields():
+    """get_recent_predictions rows contain expected fields."""
+    mgr = _sqlite_mgr()
+    mgr.save_prediction("sess-fields", 0.75, is_bot=True, threshold=0.5, scoring_type="batch")
+    preds = mgr.get_recent_predictions(limit=1)
+    assert len(preds) == 1
+    row = preds[0]
+    assert row["session_id"] == "sess-fields"
+    assert abs(row["prob_bot"] - 0.75) < 1e-6
+    assert row["label"] == "bot"
+    assert abs(row["threshold"] - 0.5) < 1e-6
+    assert row["scoring_type"] == "batch"
+
+
+def test_db_manager_bad_postgres_url_no_crash():
+    """DatabaseManager with an unreachable postgres URL does not crash on save_prediction."""
+    with mock.patch.dict(os.environ, {"DATABASE_URL": "postgresql://bad:5432/nope"}):
+        from backend.db import DatabaseManager
+        mgr = DatabaseManager()
+        # The pool is lazy; pg operations fail gracefully with a warning log
+        # This should not raise regardless of whether psycopg2 is installed
+        try:
+            mgr.save_prediction("s", 0.5, is_bot=True)
+        except Exception as exc:
+            raise AssertionError(f"save_prediction raised unexpectedly: {exc}") from exc

@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from collectors.signal_collector import SignalCollector
 from utils.helpers import isValidSignalBatch, normalizeSignalBatch, formatTimestamp
 from monitoring import metrics
+from db import db as db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -491,13 +492,15 @@ def getStats():
         if os.path.exists(signalsFile):
             fileSizeKb = os.path.getsize(signalsFile) / 1024
 
-        return jsonify({
+        result = {
             "Total Batches": totalBatches,
             "Unique Sessions": uniqueSessions,
             "Signals File Size (in Kb)": round(fileSizeKb, 1),
             "Signals File": signalsFile,
-            "Server Timestamp": formatTimestamp()
-        }), 200
+            "Server Timestamp": formatTimestamp(),
+        }
+        result.update(db_manager.get_stats())
+        return jsonify(result), 200
     
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -539,6 +542,11 @@ def saveSignals():
         success = collector.saveSignalBatch(data)
 
         if success:
+            try:
+                db_manager.save_session(data)
+            except Exception as exc:
+                logger.warning("db_manager.save_session failed: %s", exc)
+
             return jsonify({
                 "success": True,
                 "message": f"Saved batch for session {data.get('sessionID', 'unknown')}",
