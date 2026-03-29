@@ -96,14 +96,44 @@ XGBoost and RandomForest tied on all threshold-dependent metrics. XGBoost's high
 
 ---
 
-## Phase 5: Deployment & Monitoring 🔄
-**Target**: Apr 10, 2026
+## Phase 5: Deployment & Monitoring ✅
+**Completed**: Mar 29, 2026
 
-- [ ] Dockerfile — containerize Flask app + model artifacts
-- [ ] AWS Lambda deployment — serverless inference endpoint
-- [ ] CloudWatch monitoring — latency, error rate, prediction distribution
+**Live API:** https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com
+
+- [x] Dockerfile — containerize Flask app + model artifacts
+- [x] AWS Lambda deployment — serverless inference endpoint
+- [x] CloudWatch monitoring — latency, error rate, prediction distribution
 - [ ] Alerting — anomaly detection on bot rate spikes
 - [ ] PostgreSQL migration — replace JSONL storage for session/label persistence
+
+### Deployment Notes
+
+Getting Flask running in a Lambda container required fixing several environment incompatibilities in sequence:
+
+**Filesystem (read-only everywhere except `/tmp`):**
+- Added `IS_LAMBDA = os.environ.get("AWS_LAMBDA_FUNCTION_NAME") is not None` to detect Lambda at runtime
+- `SignalCollector` redirects `signals.jsonl` → `/tmp/signals.jsonl` when `IS_LAMBDA` is true
+- `PREDICTIONS_LOG` redirects `predictions_log.jsonl` → `/tmp/predictions_log.jsonl` on Lambda
+
+**Flask dev server incompatibilities:**
+- `debug=True` activates Werkzeug's `DebuggedApplication` which requires `/dev/shm` (shared memory) — Lambda doesn't have it; fixed with `debug=not IS_LAMBDA`
+- Flask's default `host='127.0.0.1'` is unreachable by Lambda's runtime interface client; fixed with `host='0.0.0.0'`
+
+**Lambda invocation model (no HTTP server):**
+- Lambda calls a handler function, not a persistent HTTP server; added a minimal WSGI bridge (`handler(event, context)`) that translates API Gateway v2 HTTP events into WSGI `environ` dicts and calls `app()` directly
+- Added `awslambdaric` to `requirements-prod.txt`; Dockerfile CMD changed to `python -m awslambdaric backend.app.handler`
+
+**joblib / scikit-learn parallelism:**
+- `joblib.load()` can attempt to spawn worker processes that require `/dev/shm`; wrapped both `load()` calls in `with parallel_backend('sequential'):`
+- Set `JOBLIB_MULTIPROCESSING=0` and `LOKY_MAX_CPU_COUNT=1` as Lambda env vars for belt-and-suspenders coverage
+
+**XGBoost OpenMP:**
+- Set `OMP_NUM_THREADS=1` to keep XGBoost single-threaded and avoid inter-process OpenMP locking
+
+**Root cause of 60s timeout — numba JIT compilation (SHAP):**
+- SHAP's `TreeExplainer` uses numba to JIT-compile tree traversal routines on first call; numba's compilation stalled for the full timeout duration in Lambda's restricted environment
+- Fixed with `NUMBA_DISABLE_JIT=1` (SHAP falls back to pure Python); `NUMBA_CACHE_DIR=/tmp/.numba` set as a safety net if JIT is re-enabled later
 
 ---
 

@@ -20,3 +20,4 @@ packaging==25.0
 psycopg2-binary
 shap
 awslambdaric
+flask-cors

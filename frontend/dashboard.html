@@ -253,6 +253,10 @@
   </div>
 
   <script>
+    const API_BASE = window.location.hostname === 'localhost'
+      ? 'http://localhost:5050'
+      : 'https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com';
+
     const REFRESH_MS = 10000;
     let _lastData = null;
 
@@ -429,7 +433,7 @@
 
     async function refresh() {
       try {
-        const resp = await fetch('/api/dashboard-stats');
+        const resp = await fetch(`${API_BASE}/api/dashboard-stats`);
         if (!resp.ok) return;
         const data = await resp.json();
         _lastData = data;
@@ -444,7 +448,7 @@
 
     async function initModel() {
       try {
-        const resp = await fetch('/health');
+        const resp = await fetch(`${API_BASE}/health`);
         if (!resp.ok) return;
         const data = await resp.json();
         if (data.model) document.getElementById('statModel').textContent = data.model;

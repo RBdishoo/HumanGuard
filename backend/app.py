@@ -15,6 +15,7 @@ Architecture:
 """
 
 from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
 import logging
 import os
 import sys
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 #Initialize Flask application
 app = Flask(__name__, static_folder='../frontend', static_url_path='')
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 #Initialize Signal Collector
 collector = SignalCollector()
