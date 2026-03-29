@@ -23,7 +23,7 @@ ROLE_NAME=humanguard-lambda-role
 IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$REPO_NAME:latest
 API_NAME=humanguard-api
 CLOUDWATCH_ENABLED=true
-SNS_ALERT_EMAIL=${SNS_ALERT_EMAIL:-""}
+SNS_ALERT_EMAIL=${SNS_ALERT_EMAIL:-"rbdishoo@gmail.com"}
 DB_MAX_CONNECTIONS=5
 
 # Fetch DATABASE_URL from Secrets Manager (set to empty if secret not yet created)
