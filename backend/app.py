@@ -54,6 +54,7 @@ PREDICTIONS_LOG = (
 
 _scoring_bundle = None
 _server_start_time = None
+_SHAP_PENDING = object()  # sentinel: explainer not yet attempted
 
 # Human-readable explanations for each feature when it contributes to a bot prediction
 FEATURE_INTERPRETATIONS = {
@@ -142,12 +143,13 @@ def _load_scoring_bundle():
 
     # explainer is created lazily on first SHAP request (shap.TreeExplainer is
     # expensive to initialize and would blow Lambda's 10s init phase limit).
+    # _SHAP_PENDING = "not yet attempted"; None = "attempted and unavailable".
     _scoring_bundle = {
         "model": model,
         "scaler": scaler,
         "feature_names": feature_names,
         "threshold": threshold,
-        "explainer": None,  # populated on first explain call by _get_shap_explainer()
+        "explainer": _SHAP_PENDING,
         # Keep a single extractor instance to reduce per-request overhead.
         "extractor": FeatureExtractor(),
     }
@@ -155,17 +157,26 @@ def _load_scoring_bundle():
 
 
 def _get_shap_explainer(bundle: dict):
-    """Return the SHAP TreeExplainer, creating it on first call (lazy init)."""
-    if bundle["explainer"] is not None:
-        return bundle["explainer"]
+    """Return the SHAP TreeExplainer, creating it on first call (lazy init).
+
+    Sentinel logic:
+      _SHAP_PENDING — not yet attempted → try to create now
+      None          — attempted and unavailable → return None immediately
+      explainer obj — ready to use → return as-is
+    """
+    current = bundle.get("explainer", _SHAP_PENDING)
+    if current is not _SHAP_PENDING:
+        return current  # None (disabled) or a live explainer
     try:
         import shap
         bundle["explainer"] = shap.TreeExplainer(bundle["model"])
         logger.info("SHAP TreeExplainer created (lazy init)")
     except ImportError:
         logger.warning("shap not installed — SHAP explanations unavailable")
+        bundle["explainer"] = None
     except Exception as exc:
         logger.warning("Failed to create SHAP explainer: %s", exc)
+        bundle["explainer"] = None
     return bundle["explainer"]
 
 
