@@ -28,7 +28,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from collectors.signal_collector import SignalCollector
-from utils.helpers import isValidSignalBatch, formatTimestamp
+from utils.helpers import isValidSignalBatch, normalizeSignalBatch, formatTimestamp
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +197,8 @@ def scoreSignals():
         data = request.get_json(silent=True)
         if not data:
             return jsonify({"Error": "No JSON data received"}), 400
+
+        data = normalizeSignalBatch(data)
 
         if not isValidSignalBatch(data):
             return jsonify({
@@ -507,6 +509,8 @@ def saveSignals():
 
         if not data:
              return jsonify({"Error": "No JSON data received"}), 400
+
+        data = normalizeSignalBatch(data)
 
         #Validate structure
         if not isValidSignalBatch(data):

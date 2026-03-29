@@ -9,7 +9,10 @@ These are the utility functions used across the application:
 
 import os
 import json
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 def genSeshID():
     import time
@@ -41,19 +44,65 @@ def formatTimestamp():
     """Current timestamp in ISO format"""
     return datetime.utcnow().isoformat() + 'Z'
 
-def isValidSignalBatch(data):
+def normalizeSignalBatch(data):
+    """
+    Normalize alternative field names to the canonical schema before validation.
 
-    "Validate that incoming signal batch has required fields"
-    requiredFields = ['sessionID', 'signals']
-    if not all(field in data for field in requiredFields):
+    Handles:
+      - sessionId  (lowercase d)  → sessionID
+      - mouseEvents at top level  → signals.mouseMoves
+      - keyEvents   at top level  → signals.keys
+      - clickEvents at top level  → signals.clicks
+    """
+    if not isinstance(data, dict):
+        return data
+
+    normalized = dict(data)
+
+    # sessionId → sessionID
+    if 'sessionId' in normalized and 'sessionID' not in normalized:
+        normalized['sessionID'] = normalized.pop('sessionId')
+
+    # flat event arrays → signals wrapper
+    if 'signals' not in normalized:
+        flat_keys = {'mouseEvents': 'mouseMoves', 'keyEvents': 'keys', 'clickEvents': 'clicks'}
+        has_flat = any(k in normalized for k in flat_keys)
+        if has_flat:
+            signals = {}
+            for src, dst in flat_keys.items():
+                if src in normalized:
+                    signals[dst] = normalized.pop(src)
+            normalized['signals'] = signals
+
+    return normalized
+
+
+def isValidSignalBatch(data):
+    """Validate that incoming signal batch has required fields."""
+    logger.debug("isValidSignalBatch — incoming keys: %s", list(data.keys()) if isinstance(data, dict) else type(data))
+
+    if not isinstance(data, dict):
+        logger.warning("isValidSignalBatch FAILED — data is not a dict (got %s)", type(data))
         return False
-    
+
+    if 'sessionID' not in data:
+        logger.warning("isValidSignalBatch FAILED — missing 'sessionID' (keys present: %s)", list(data.keys()))
+        return False
+
+    if 'signals' not in data:
+        logger.warning("isValidSignalBatch FAILED — missing 'signals' (keys present: %s)", list(data.keys()))
+        return False
+
     signals = data.get("signals", {})
 
-    #Each signals sub-field should be a list
+    if not isinstance(signals, dict):
+        logger.warning("isValidSignalBatch FAILED — 'signals' is not a dict (got %s)", type(signals))
+        return False
+
     for key in ["mouseMoves", "clicks", "keys"]:
         if key in signals and not isinstance(signals[key], list):
+            logger.warning("isValidSignalBatch FAILED — signals.%s must be a list (got %s)", key, type(signals[key]))
             return False
-    
+
     return True
     
