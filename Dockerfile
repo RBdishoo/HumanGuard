@@ -10,4 +10,4 @@ COPY . .
 EXPOSE 8080
 ENV PORT=8080
 
-CMD ["python", "-m", "backend.app"]
+CMD ["python", "-m", "awslambdaric", "backend.app.handler"]

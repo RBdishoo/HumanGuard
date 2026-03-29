@@ -19,3 +19,4 @@ six==1.17.0
 packaging==25.0
 psycopg2-binary
 shap
+awslambdaric

@@ -17,11 +17,11 @@ set -e
 # --- CONFIG ---
 AWS_ACCOUNT_ID=796793347388
 AWS_REGION=us-east-1
-REPO_NAME=humanGuard
-FUNCTION_NAME=humanGuard
-ROLE_NAME=humanGuard-lambda-role
+REPO_NAME=humanguard
+FUNCTION_NAME=humanguard
+ROLE_NAME=humanguard-lambda-role
 IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$REPO_NAME:latest
-API_NAME=humanGuard-api
+API_NAME=humanguard-api
 
 echo "=== HumanGuard AWS Deployment ==="
 echo "Account:  $AWS_ACCOUNT_ID"
@@ -64,7 +64,7 @@ echo ""
 echo "--- Step 3: Build, tag, and push image ---"
 
 # Build the Docker image from the repository root
-docker build -t "$REPO_NAME:latest" .
+docker build --platform linux/amd64 -t "$REPO_NAME:latest" .
 
 # Tag the image for ECR
 docker tag "$REPO_NAME:latest" "$IMAGE_URI"

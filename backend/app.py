@@ -42,7 +42,11 @@ activeSessions = set()
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models" / "trained"
 MODEL_NAME = "XGBoost"
-PREDICTIONS_LOG = Path(__file__).resolve().parent / "data" / "predictions_log.jsonl"
+IS_LAMBDA = os.environ.get("AWS_LAMBDA_FUNCTION_NAME") is not None
+PREDICTIONS_LOG = (
+    Path("/tmp/predictions_log.jsonl") if IS_LAMBDA
+    else Path(__file__).resolve().parent / "data" / "predictions_log.jsonl"
+)
 
 _scoring_bundle = None
 _server_start_time = None
@@ -127,8 +131,10 @@ def _load_scoring_bundle():
         except Exception:
             threshold = 0.5
 
-    model = joblib.load(model_path)
-    scaler = joblib.load(scaler_path)
+    from joblib import parallel_backend
+    with parallel_backend('sequential'):
+        model = joblib.load(model_path)
+        scaler = joblib.load(scaler_path)
 
     # Load SHAP explainer if shap is installed
     explainer = None
@@ -697,7 +703,78 @@ def serveDashboard():
     return send_from_directory('../frontend', 'dashboard.html')
 
 
+if IS_LAMBDA:
+    import base64
+    import io
+
+    def handler(event, context):
+        """Minimal API Gateway v2 → Flask WSGI bridge for Lambda."""
+        rc = event.get("requestContext", {}).get("http", {})
+        method = rc.get("method", "GET")
+        path = event.get("rawPath", "/")
+        query_string = event.get("rawQueryString", "") or ""
+        headers = event.get("headers", {}) or {}
+        body = event.get("body") or ""
+        if event.get("isBase64Encoded"):
+            body = base64.b64decode(body)
+        elif isinstance(body, str):
+            body = body.encode("utf-8")
+        else:
+            body = b""
+
+        environ = {
+            "REQUEST_METHOD": method,
+            "SCRIPT_NAME": "",
+            "PATH_INFO": path,
+            "QUERY_STRING": query_string,
+            "SERVER_NAME": "lambda",
+            "SERVER_PORT": "443",
+            "SERVER_PROTOCOL": "HTTP/1.1",
+            "CONTENT_LENGTH": str(len(body)),
+            "wsgi.version": (1, 0),
+            "wsgi.url_scheme": "https",
+            "wsgi.input": io.BytesIO(body),
+            "wsgi.errors": sys.stderr,
+            "wsgi.multithread": False,
+            "wsgi.multiprocess": False,
+            "wsgi.run_once": False,
+        }
+        for k, v in headers.items():
+            key = k.upper().replace("-", "_")
+            if key == "CONTENT_TYPE":
+                environ["CONTENT_TYPE"] = v
+            elif key == "CONTENT_LENGTH":
+                environ["CONTENT_LENGTH"] = v
+            else:
+                environ[f"HTTP_{key}"] = v
+
+        resp_status = [None]
+        resp_headers = [{}]
+        resp_body = []
+
+        def start_response(status, response_headers, exc_info=None):
+            resp_status[0] = status
+            resp_headers[0] = dict(response_headers)
+
+        for chunk in app(environ, start_response):
+            resp_body.append(chunk)
+
+        body_bytes = b"".join(resp_body)
+        try:
+            body_str = body_bytes.decode("utf-8")
+            is_b64 = False
+        except UnicodeDecodeError:
+            body_str = base64.b64encode(body_bytes).decode("utf-8")
+            is_b64 = True
+
+        return {
+            "statusCode": int(resp_status[0].split(" ", 1)[0]),
+            "headers": resp_headers[0],
+            "body": body_str,
+            "isBase64Encoded": is_b64,
+        }
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     _server_start_time = time.time()
-    app.run(debug=True, port=int(os.environ.get("PORT", 5050)))
+    app.run(host="0.0.0.0", debug=not IS_LAMBDA, port=int(os.environ.get("PORT", 5050)))

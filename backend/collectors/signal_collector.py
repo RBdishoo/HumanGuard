@@ -17,13 +17,15 @@ Signal Collector Module
 
 import json
 import logging
+import os
 from utils.helpers import formatTimestamp
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-baseDirectory = Path(__file__).parent.parent #backend/
-signalsFile = baseDirectory / "data" / "raw" / "signals.jsonl"
+IS_LAMBDA = os.environ.get("AWS_LAMBDA_FUNCTION_NAME") is not None
+DATA_DIR = Path("/tmp") if IS_LAMBDA else Path(__file__).parent.parent / "data" / "raw"
+signalsFile = DATA_DIR / "signals.jsonl"
 
 class SignalCollector:
 
