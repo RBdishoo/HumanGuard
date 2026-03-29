@@ -181,7 +181,8 @@ def _get_shap_explainer(bundle: dict):
 
 
 def _log_prediction_local(session_id, prob_bot, label, threshold,
-                          scoring_type="batch", response_time_ms=None, explanation=None):
+                          scoring_type="batch", response_time_ms=None, explanation=None,
+                          source=None, ground_truth_label=None):
     """Append a prediction entry to the local JSONL log for dashboard fallback."""
     entry = {
         "sessionID": session_id,
@@ -195,6 +196,10 @@ def _log_prediction_local(session_id, prob_bot, label, threshold,
         entry["response_time_ms"] = response_time_ms
     if explanation is not None:
         entry["explanation"] = explanation
+    if source is not None:
+        entry["source"] = source
+    if ground_truth_label is not None:
+        entry["ground_truth_label"] = ground_truth_label
     try:
         PREDICTIONS_LOG.parent.mkdir(parents=True, exist_ok=True)
         with open(PREDICTIONS_LOG, "a") as f:
@@ -226,6 +231,10 @@ def scoreSignals():
                 "received__keys": list(data.keys()),
                 "signals_type": str(type(data.get("signals"))),
             }), 400
+
+        # Extract source/ground-truth label metadata from payload (pass-through fields)
+        payload_source = data.get("source")
+        payload_ground_truth = data.get("label")  # ground truth, not predicted label
 
         # Basic abuse prevention: cap number of events to keep feature extraction bounded.
         signals = data.get("signals") or {}
@@ -274,9 +283,17 @@ def scoreSignals():
         try:
             from db.db_client import is_available as db_available, save_prediction
             if db_available():
-                save_prediction(data.get("sessionID"), prob_bot, label, float(bundle["threshold"]))
+                save_prediction(data.get("sessionID"), prob_bot, label, float(bundle["threshold"]),
+                                source=payload_source)
         except Exception as exc:
             logger.warning("Failed to save prediction to PostgreSQL: %s", exc)
+
+        # Persist session metadata (source/label) when provided via demo or simulator
+        if payload_source or payload_ground_truth:
+            try:
+                db_manager.save_session(data)
+            except Exception as exc:
+                logger.warning("Failed to save session metadata from score endpoint: %s", exc)
 
         response = {
             "success": True,
@@ -299,6 +316,8 @@ def scoreSignals():
             scoring_type="batch",
             response_time_ms=_response_time_ms,
             explanation=response.get("explanation"),
+            source=payload_source,
+            ground_truth_label=payload_ground_truth,
         )
         metrics.record_prediction(is_bot=(label == "bot"), latency_ms=_response_time_ms)
 
@@ -738,6 +757,71 @@ def dashboardStats():
 def serveDashboard():
     """GET /dashboard — Serves the live monitoring dashboard."""
     return send_from_directory('../frontend', 'dashboard.html')
+
+
+@app.route('/demo', methods=['GET'])
+def serveDemo():
+    """GET /demo — Serves the public-facing human verification demo."""
+    return send_from_directory('../frontend', 'demo.html')
+
+
+@app.route('/simulate', methods=['GET'])
+def serveSimulator():
+    """GET /simulate — Serves the internal bot behavior simulator."""
+    return send_from_directory('../frontend', 'bot_simulator.html')
+
+
+@app.route('/api/export', methods=['GET'])
+def exportSessions():
+    """
+    GET /api/export
+    Returns all labeled sessions as CSV for retraining.
+    Protected by X-Export-Key header (set EXPORT_API_KEY env var; defaults to 'devkey').
+    """
+    import csv
+    import io
+    from flask import Response
+
+    api_key = request.headers.get("X-Export-Key", "")
+    export_key = os.environ.get("EXPORT_API_KEY", "devkey")
+    if not api_key or api_key != export_key:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    records = []
+    if PREDICTIONS_LOG.exists():
+        with open(PREDICTIONS_LOG, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except Exception:
+                    continue
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "session_id", "source", "ground_truth_label",
+        "prob_bot", "predicted_label", "threshold", "scoring_type", "timestamp",
+    ])
+    for r in records:
+        writer.writerow([
+            r.get("sessionID", ""),
+            r.get("source", ""),
+            r.get("ground_truth_label", ""),
+            r.get("prob_bot", ""),
+            r.get("label", ""),
+            r.get("threshold", ""),
+            r.get("scoring_type", "batch"),
+            r.get("timestamp", ""),
+        ])
+
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=humanguard_sessions.csv"},
+    )
 
 
 if IS_LAMBDA:

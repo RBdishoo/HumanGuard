@@ -98,19 +98,27 @@ def save_signal_batch(batch_data):
     raw_signals = batch_data.get("signals") or {}
     batch_timestamp = batch_data.get("timestamp")
 
+    source = batch_data.get("source")
+    ground_truth_label = batch_data.get("label")
+
     conn = get_connection()
     try:
         cur = conn.cursor()
 
         cur.execute(
-            """INSERT INTO sessions (session_id, user_agent, viewport_width, viewport_height)
-               VALUES (%s, %s, %s, %s)
-               ON CONFLICT (session_id) DO NOTHING""",
+            """INSERT INTO sessions (session_id, user_agent, viewport_width, viewport_height,
+                                     source, label)
+               VALUES (%s, %s, %s, %s, %s, %s)
+               ON CONFLICT (session_id) DO UPDATE SET
+                   source = COALESCE(EXCLUDED.source, sessions.source),
+                   label  = COALESCE(EXCLUDED.label,  sessions.label)""",
             (
                 session_id,
                 meta.get("userAgent"),
                 meta.get("viewportWidth"),
                 meta.get("viewportHeight"),
+                source,
+                ground_truth_label,
             ),
         )
 
@@ -128,7 +136,7 @@ def save_signal_batch(batch_data):
         release_connection(conn)
 
 
-def save_prediction(session_id, prob_bot, label, threshold, scoring_type="batch"):
+def save_prediction(session_id, prob_bot, label, threshold, scoring_type="batch", source=None):
     """Insert a prediction row, ensuring the session row exists first."""
     conn = get_connection()
     try:
@@ -139,9 +147,10 @@ def save_prediction(session_id, prob_bot, label, threshold, scoring_type="batch"
             (session_id,),
         )
         cur.execute(
-            """INSERT INTO predictions (session_id, prob_bot, label, threshold, scoring_type)
-               VALUES (%s, %s, %s, %s, %s)""",
-            (session_id, prob_bot, label, threshold, scoring_type),
+            """INSERT INTO predictions (session_id, prob_bot, label, threshold, scoring_type,
+                                        source)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
+            (session_id, prob_bot, label, threshold, scoring_type, source),
         )
         conn.commit()
     except Exception:

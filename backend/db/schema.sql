@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_agent      TEXT,
     viewport_width  INTEGER,
     viewport_height INTEGER,
+    source          VARCHAR(100),
+    label           VARCHAR(10),
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -44,6 +46,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     label           VARCHAR(10) NOT NULL,
     threshold       DOUBLE PRECISION NOT NULL,
     scoring_type    VARCHAR(10) NOT NULL DEFAULT 'batch' CHECK (scoring_type IN ('batch', 'session')),
+    source          VARCHAR(100),
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 

@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HumanGuard — Bot Simulator</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 13px;
+      min-height: 100vh;
+      padding: 32px 24px 60px;
+    }
+
+    /* ── Header ── */
+    .header {
+      margin-bottom: 28px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #30363d;
+    }
+    .header h1 {
+      font-size: 18px;
+      color: #58a6ff;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .header p { color: #8b949e; font-size: 11px; }
+    .warn-badge {
+      display: inline-block;
+      background: #2d2612;
+      color: #d29922;
+      border: 1px solid #3a3010;
+      padding: 4px 12px;
+      border-radius: 4px;
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-top: 8px;
+    }
+
+    /* ── Run button ── */
+    .btn-run {
+      display: inline-block;
+      padding: 12px 28px;
+      background: #388bfd;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      cursor: pointer;
+      margin-bottom: 24px;
+      transition: background 0.2s;
+    }
+    .btn-run:hover { background: #58a6ff; }
+    .btn-run:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+
+    /* ── Grid ── */
+    .sim-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 14px;
+    }
+
+    /* ── Sim card ── */
+    .sim-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .sim-card.running { border-color: #1f6feb; }
+    .sim-card.done-bot { border-color: #f85149; }
+    .sim-card.done-human { border-color: #3fb950; }
+
+    .sim-name {
+      font-size: 11px;
+      font-weight: bold;
+      color: #c9d1d9;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .sim-desc {
+      font-size: 11px;
+      color: #8b949e;
+      line-height: 1.5;
+    }
+
+    /* ── Status indicator ── */
+    .sim-status {
+      font-size: 10px;
+      color: #484f58;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #30363d;
+      flex-shrink: 0;
+    }
+    .status-dot.spinning {
+      animation: pulse 0.8s ease-in-out infinite;
+      background: #58a6ff;
+    }
+    .status-dot.bot    { background: #f85149; }
+    .status-dot.human  { background: #3fb950; }
+    .status-dot.warn   { background: #d29922; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    /* ── Result block ── */
+    .sim-result { display: none; }
+    .sim-result.visible { display: block; }
+
+    .prob-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .prob-number {
+      font-size: 26px;
+      font-weight: bold;
+      line-height: 1;
+      min-width: 52px;
+    }
+    .verdict-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 3px;
+      font-size: 9px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .badge-bot   { background: #3d1c1c; color: #f85149; }
+    .badge-human { background: #1c3d2a; color: #3fb950; }
+    .badge-warn  { background: #2d2612; color: #d29922; }
+
+    .prob-bar-bg {
+      width: 100%;
+      height: 5px;
+      background: #21262d;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 2px;
+    }
+    .prob-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.7s ease;
+      width: 0%;
+    }
+
+    .shap-mini { margin-top: 8px; }
+    .shap-mini-title {
+      font-size: 9px;
+      color: #484f58;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 6px;
+    }
+    .shap-feat {
+      font-size: 10px;
+      color: #8b949e;
+      margin-bottom: 3px;
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    .shap-feat-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .shap-feat-val { flex-shrink: 0; color: #484f58; }
+
+    .error-msg { font-size: 10px; color: #f85149; }
+
+    /* ── Summary bar ── */
+    .summary-bar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .sum-pill {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 6px 14px;
+      font-size: 11px;
+      color: #8b949e;
+    }
+    .sum-pill span { font-weight: bold; }
+    .sum-pill span.red   { color: #f85149; }
+    .sum-pill span.green { color: #3fb950; }
+    .sum-pill span.blue  { color: #58a6ff; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>HumanGuard — Bot Simulator</h1>
+    <p>Runs synthetic bot behavior patterns against <code>POST /api/score</code> to verify model detection.</p>
+    <div class="warn-badge">Internal Tool — Not Linked Publicly</div>
+  </div>
+
+  <button class="btn-run" id="runBtn" onclick="runAll()">Run All Simulations</button>
+
+  <div class="summary-bar" id="summaryBar" style="display:none">
+    <div class="sum-pill">Correct bot detections: <span class="red" id="sumBotCorrect">—</span></div>
+    <div class="sum-pill">Missed bots: <span class="green" id="sumMissed">—</span></div>
+    <div class="sum-pill">Avg prob_bot: <span class="blue" id="sumAvgProb">—</span></div>
+  </div>
+
+  <div class="sim-grid" id="simGrid"></div>
+
+  <script>
+    const API_BASE = window.location.hostname === 'localhost'
+      ? 'http://localhost:5050'
+      : window.location.origin;
+
+    // ── Bot pattern generators ─────────────────────────────────────────
+
+    function makeLinearMouse() {
+      // Perfect straight line, constant velocity, zero angular variance
+      const moves = [];
+      const base = Date.now();
+      for (let i = 0; i <= 40; i++) {
+        moves.push({ x: i * 25, y: 200, ts: base + i * 50 });
+      }
+      return {
+        mouseMoves: moves,
+        clicks: [{ x: 500, y: 200, ts: base + 2000, button: 0 }],
+        keys: [],
+      };
+    }
+
+    function makeNoMouse() {
+      // No mouse movement; clicks appear at perfectly regular intervals from same spot
+      const clicks = [];
+      const base = Date.now();
+      for (let i = 0; i < 12; i++) {
+        clicks.push({ x: 640, y: 360, ts: base + i * 500, button: 0 });
+      }
+      return { mouseMoves: [], clicks, keys: [] };
+    }
+
+    function makeFastTyping() {
+      // Keys typed at superhuman speed (1–3 ms intervals)
+      const keys = [];
+      const base = Date.now();
+      const sentence = 'the quick brown fox jumps over the lazy dog';
+      for (let i = 0; i < sentence.length; i++) {
+        keys.push({ key: sentence[i], ts: base + i * 2 });
+      }
+      const moves = [{ x: 100, y: 100, ts: base }];
+      return { mouseMoves: moves, clicks: [], keys };
+    }
+
+    function makeRandomKeystrokes() {
+      // Random character codes at random timing — no linguistic entropy
+      const keys = [];
+      const base = Date.now();
+      const pool = '!@#$%^&*()1234567890';
+      let t = base;
+      for (let i = 0; i < 60; i++) {
+        t += Math.floor(Math.random() * 8) + 1;  // 1–8 ms
+        keys.push({ key: pool[Math.floor(Math.random() * pool.length)], ts: t });
+      }
+      const moves = [];
+      let mx = 0;
+      for (let i = 0; i < 20; i++) {
+        mx += Math.floor(Math.random() * 5);
+        moves.push({ x: mx, y: 200, ts: base + i * 100 });
+      }
+      return { mouseMoves: moves, clicks: [], keys };
+    }
+
+    function makeReplayAttack() {
+      // Exact copy of linearMouse events with timestamps frozen to same base value
+      // (as if replayed from a recorded session)
+      const base = 1700000000000;  // fixed epoch — static replay
+      const moves = [];
+      for (let i = 0; i <= 40; i++) {
+        moves.push({ x: i * 25, y: 200, ts: base + i * 50 });
+      }
+      const clicks = [{ x: 500, y: 200, ts: base + 2000, button: 0 }];
+      const keys = [];
+      for (let i = 0; i < 30; i++) {
+        keys.push({ key: String.fromCharCode(97 + (i % 26)), ts: base + i * 100 });
+      }
+      return { mouseMoves: moves, clicks, keys };
+    }
+
+    // ── Pattern registry ───────────────────────────────────────────────
+
+    const PATTERNS = [
+      {
+        id: 'linear',
+        name: 'Linear Mouse',
+        desc: 'Perfectly straight mouse trajectory at constant velocity. Zero angular variance and no natural path deviations.',
+        generate: makeLinearMouse,
+      },
+      {
+        id: 'nomouse',
+        name: 'No Mouse',
+        desc: 'No mouse movement at all. Clicks appear at precise 500 ms intervals from a fixed coordinate.',
+        generate: makeNoMouse,
+      },
+      {
+        id: 'fasttype',
+        name: 'Fast Typing',
+        desc: 'Keystrokes at 2 ms intervals — physically impossible for a human typist. Minimal mouse activity.',
+        generate: makeFastTyping,
+      },
+      {
+        id: 'random',
+        name: 'Random Keystrokes',
+        desc: 'Random special characters at sub-10 ms intervals. No linguistic structure or entropy pattern.',
+        generate: makeRandomKeystrokes,
+      },
+      {
+        id: 'replay',
+        name: 'Replay Attack',
+        desc: 'Frozen-epoch signal replay: all timestamps anchored to a static base, identical sequence every run.',
+        generate: makeReplayAttack,
+      },
+    ];
+
+    // ── Build cards ────────────────────────────────────────────────────
+
+    function buildGrid() {
+      const grid = document.getElementById('simGrid');
+      grid.innerHTML = PATTERNS.map(p => `
+        <div class="sim-card" id="card-${p.id}">
+          <div class="sim-name">${p.name}</div>
+          <div class="sim-desc">${p.desc}</div>
+          <div class="sim-status">
+            <div class="status-dot" id="dot-${p.id}"></div>
+            <span id="statusTxt-${p.id}">Idle</span>
+          </div>
+          <div class="sim-result" id="result-${p.id}"></div>
+        </div>
+      `).join('');
+    }
+
+    // ── Run a single pattern ───────────────────────────────────────────
+
+    async function runPattern(p) {
+      const card    = document.getElementById(`card-${p.id}`);
+      const dot     = document.getElementById(`dot-${p.id}`);
+      const statusTxt = document.getElementById(`statusTxt-${p.id}`);
+      const resultEl  = document.getElementById(`result-${p.id}`);
+
+      card.className = 'sim-card running';
+      dot.className = 'status-dot spinning';
+      statusTxt.textContent = 'Running…';
+      resultEl.className = 'sim-result';
+      resultEl.innerHTML = '';
+
+      const sessionID = `sim-${p.id}-${Date.now()}-${Math.random().toString(36).substr(2,6)}`;
+      const payload = {
+        sessionID,
+        source: 'simulator',
+        label: 'bot',
+        metadata: { userAgent: 'HumanGuard-BotSimulator/1.0', viewportWidth: 1280, viewportHeight: 800 },
+        signals: p.generate(),
+      };
+
+      try {
+        const resp = await fetch(`${API_BASE}/api/score`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.Error || `HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        renderPatternResult(p.id, data);
+        return data.prob_bot;
+      } catch (err) {
+        card.className = 'sim-card';
+        dot.className = 'status-dot warn';
+        statusTxt.textContent = 'Error';
+        resultEl.className = 'sim-result visible';
+        resultEl.innerHTML = `<div class="error-msg">${err.message}</div>`;
+        return null;
+      }
+    }
+
+    function renderPatternResult(id, data) {
+      const card    = document.getElementById(`card-${id}`);
+      const dot     = document.getElementById(`dot-${id}`);
+      const statusTxt = document.getElementById(`statusTxt-${id}`);
+      const resultEl  = document.getElementById(`result-${id}`);
+
+      const prob    = typeof data.prob_bot === 'number' ? data.prob_bot : 0;
+      const pct     = Math.round(prob * 100);
+      const isBot   = data.label === 'bot';
+      const isSusp  = prob >= 0.35 && !isBot;
+
+      let badgeCls, badgeTxt, dotCls, statusColor;
+      if (isBot)        { badgeCls = 'badge-bot';   badgeTxt = 'BOT DETECTED'; dotCls = 'bot';  statusColor = '#f85149'; }
+      else if (isSusp)  { badgeCls = 'badge-warn';  badgeTxt = 'SUSPICIOUS';   dotCls = 'warn'; statusColor = '#d29922'; }
+      else              { badgeCls = 'badge-human';  badgeTxt = 'MISSED';       dotCls = 'human';statusColor = '#3fb950'; }
+
+      const barColor = isBot ? '#f85149' : (isSusp ? '#d29922' : '#3fb950');
+
+      card.className = `sim-card done-${isBot ? 'bot' : 'human'}`;
+      dot.className = `status-dot ${dotCls}`;
+      statusTxt.textContent = isBot ? 'Detected as bot' : (isSusp ? 'Suspicious' : 'Not detected');
+      statusTxt.style.color = statusColor;
+
+      const top3 = (data.explanation && data.explanation.top_features
+        ? data.explanation.top_features.slice(0, 3) : []);
+      const shapHtml = top3.length > 0 ? `
+        <div class="shap-mini">
+          <div class="shap-mini-title">Top Signals</div>
+          ${top3.map(f => `
+            <div class="shap-feat">
+              <span class="shap-feat-name">${f.feature}</span>
+              <span class="shap-feat-val">${f.contribution > 0 ? '+' : ''}${f.contribution.toFixed(3)}</span>
+            </div>
+          `).join('')}
+        </div>
+      ` : '';
+
+      resultEl.className = 'sim-result visible';
+      resultEl.innerHTML = `
+        <div class="prob-row">
+          <div class="prob-number" style="color:${barColor}">${pct}%</div>
+          <div class="verdict-badge ${badgeCls}">${badgeTxt}</div>
+        </div>
+        <div class="prob-bar-bg">
+          <div class="prob-bar-fill" id="pbar-${id}" style="background:${barColor}"></div>
+        </div>
+        ${shapHtml}
+      `;
+
+      setTimeout(() => {
+        const bar = document.getElementById(`pbar-${id}`);
+        if (bar) bar.style.width = pct + '%';
+      }, 60);
+    }
+
+    // ── Run all ────────────────────────────────────────────────────────
+
+    async function runAll() {
+      const btn = document.getElementById('runBtn');
+      btn.disabled = true;
+      btn.textContent = 'Running…';
+      document.getElementById('summaryBar').style.display = 'none';
+
+      buildGrid();
+
+      // Run patterns with small stagger for visual effect
+      const probs = [];
+      for (const p of PATTERNS) {
+        const prob = await runPattern(p);
+        if (prob !== null) probs.push(prob);
+        await new Promise(r => setTimeout(r, 200));
+      }
+
+      // Summary
+      const botCorrect = probs.filter(p => p >= 0.5).length;
+      const missed     = probs.length - botCorrect;
+      const avgProb    = probs.length > 0
+        ? (probs.reduce((a, b) => a + b, 0) / probs.length * 100).toFixed(1)
+        : '—';
+
+      document.getElementById('sumBotCorrect').textContent = `${botCorrect}/${PATTERNS.length}`;
+      document.getElementById('sumMissed').textContent = missed;
+      document.getElementById('sumAvgProb').textContent = avgProb + '%';
+      document.getElementById('summaryBar').style.display = 'flex';
+
+      btn.disabled = false;
+      btn.textContent = 'Run All Simulations';
+    }
+
+    // ── Boot ───────────────────────────────────────────────────────────
+    buildGrid();
+  </script>
+
+</body>
+</html>

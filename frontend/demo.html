@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HumanGuard — Are You Human?</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 14px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px 60px;
+    }
+
+    /* ── Header ── */
+    .header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .header h1 {
+      font-size: 26px;
+      color: #58a6ff;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .header p {
+      color: #8b949e;
+      font-size: 12px;
+      letter-spacing: 1px;
+    }
+
+    /* ── Counter card ── */
+    .counter-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 18px 40px;
+      width: 100%;
+      max-width: 600px;
+      text-align: center;
+      margin-bottom: 14px;
+    }
+    .counter-number {
+      font-size: 38px;
+      font-weight: bold;
+      color: #3fb950;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .counter-label {
+      font-size: 10px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 28px 32px;
+      width: 100%;
+      max-width: 600px;
+      margin-bottom: 14px;
+    }
+    .card-title {
+      font-size: 10px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #21262d;
+    }
+
+    /* ── Status bar ── */
+    .status-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 22px;
+      flex-wrap: wrap;
+    }
+    .stat-pill {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 5px 12px;
+      font-size: 11px;
+      color: #8b949e;
+    }
+    .stat-pill span { color: #58a6ff; font-weight: bold; }
+
+    /* ── Steps ── */
+    .step { margin-bottom: 26px; }
+    .step-label {
+      font-size: 10px;
+      color: #484f58;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+    .step-prompt {
+      color: #58a6ff;
+      font-size: 13px;
+      padding: 10px 14px;
+      background: #0d1117;
+      border-left: 3px solid #1f6feb;
+      border-radius: 0 4px 4px 0;
+      margin-bottom: 12px;
+      letter-spacing: 0.5px;
+    }
+    textarea {
+      width: 100%;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #c9d1d9;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 13px;
+      padding: 12px 14px;
+      resize: none;
+      outline: none;
+      height: 56px;
+      line-height: 1.5;
+      transition: border-color 0.2s;
+    }
+    textarea:focus { border-color: #58a6ff; }
+
+    .step-status {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 8px;
+      font-size: 11px;
+      color: #484f58;
+    }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #30363d;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .dot.done { background: #3fb950; }
+
+    /* ── Target arena ── */
+    .target-arena {
+      position: relative;
+      width: 100%;
+      height: 110px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      overflow: hidden;
+      cursor: default;
+    }
+    .target {
+      position: absolute;
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      background: rgba(31, 111, 235, 0.15);
+      border: 2px solid #1f6feb;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      transition: background 0.2s, transform 0.15s, border-color 0.2s;
+      user-select: none;
+    }
+    .target:hover {
+      background: rgba(31, 111, 235, 0.4);
+      transform: scale(1.15);
+    }
+    .target.hit {
+      background: rgba(63, 185, 80, 0.25);
+      border-color: #3fb950;
+    }
+    .target-hint {
+      position: absolute;
+      bottom: 8px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 10px;
+      color: #484f58;
+      pointer-events: none;
+    }
+
+    /* ── Submit button ── */
+    .btn {
+      width: 100%;
+      padding: 14px;
+      background: #1f6feb;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 13px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      cursor: pointer;
+      text-transform: uppercase;
+      transition: background 0.2s, transform 0.1s;
+      margin-top: 4px;
+    }
+    .btn:hover { background: #388bfd; }
+    .btn:active { transform: scale(0.99); }
+    .btn:disabled {
+      background: #21262d;
+      color: #484f58;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* ── Results ── */
+    .results { display: none; margin-top: 24px; }
+    .results.visible { display: block; }
+
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      color: #8b949e;
+      font-size: 12px;
+      padding: 20px;
+    }
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid #30363d;
+      border-top-color: #58a6ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .result-content { display: none; }
+
+    /* ── Verdict ── */
+    .result-header { text-align: center; margin-bottom: 20px; }
+    .verdict-badge {
+      display: inline-block;
+      padding: 7px 22px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+    .verdict-human   { background: #1c3d2a; color: #3fb950; }
+    .verdict-suspicious { background: #2d2612; color: #d29922; }
+    .verdict-bot     { background: #3d1c1c; color: #f85149; }
+
+    .prob-display {
+      font-size: 40px;
+      font-weight: bold;
+      margin-bottom: 2px;
+      line-height: 1;
+    }
+    .prob-label {
+      font-size: 10px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+
+    /* ── Probability bar ── */
+    .prob-bar-bg {
+      width: 100%;
+      height: 8px;
+      background: #21262d;
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 18px 0;
+    }
+    .prob-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      width: 0%;
+      transition: width 0.9s cubic-bezier(0.25, 0.8, 0.25, 1);
+    }
+
+    /* ── SHAP block ── */
+    .shap-title {
+      font-size: 10px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 14px;
+    }
+    .feat-row { margin-bottom: 12px; }
+    .feat-name {
+      font-size: 11px;
+      color: #8b949e;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .feat-bar-wrap {
+      height: 6px;
+      background: #21262d;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .feat-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.6s ease;
+      width: 0%;
+    }
+    .feat-contrib {
+      font-size: 10px;
+      color: #484f58;
+      text-align: right;
+      margin-top: 3px;
+    }
+
+    .interpretation {
+      font-size: 12px;
+      color: #8b949e;
+      padding: 12px 14px;
+      background: #0d1117;
+      border-radius: 4px;
+      border-left: 3px solid #30363d;
+      margin-top: 16px;
+      line-height: 1.7;
+    }
+
+    /* ── Reset button ── */
+    .btn-secondary {
+      width: 100%;
+      padding: 12px;
+      background: transparent;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #8b949e;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 16px;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .btn-secondary:hover { border-color: #58a6ff; color: #58a6ff; }
+
+    /* ── Footer ── */
+    .footer {
+      margin-top: 24px;
+      font-size: 10px;
+      color: #484f58;
+      text-align: center;
+      letter-spacing: 1px;
+    }
+
+    @media (max-width: 640px) {
+      body { padding: 24px 14px 40px; }
+      .header h1 { font-size: 20px; }
+      .card { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <h1>HumanGuard</h1>
+    <p>Behavioral Bot Detection — Real-Time Human Verification</p>
+  </div>
+
+  <!-- Counter -->
+  <div class="counter-card">
+    <div class="counter-number" id="humanCount">—</div>
+    <div class="counter-label">Humans Verified</div>
+  </div>
+
+  <!-- Challenge Card -->
+  <div class="card">
+    <div class="card-title">Human Verification Challenge</div>
+
+    <div class="status-bar">
+      <div class="stat-pill">Events: <span id="eventCount">0</span></div>
+      <div class="stat-pill">Mouse: <span id="mouseCount">0</span></div>
+      <div class="stat-pill">Keys: <span id="keyCount">0</span></div>
+    </div>
+
+    <!-- Step 1: Typing -->
+    <div class="step">
+      <div class="step-label">Step 1 — Type the sentence below</div>
+      <div class="step-prompt">The quick brown fox jumps over the lazy dog</div>
+      <textarea id="typeInput" placeholder="Start typing here…" autocomplete="off" spellcheck="false"></textarea>
+      <div class="step-status">
+        <div class="dot" id="dot1"></div>
+        <span id="status1">Waiting for input</span>
+      </div>
+    </div>
+
+    <!-- Step 2: Target -->
+    <div class="step">
+      <div class="step-label">Step 2 — Click the target</div>
+      <div class="target-arena" id="targetArena">
+        <div class="target" id="target">🎯</div>
+        <div class="target-hint">Move your mouse and click the glowing target</div>
+      </div>
+      <div class="step-status">
+        <div class="dot" id="dot2"></div>
+        <span id="status2">Waiting for click</span>
+      </div>
+    </div>
+
+    <!-- Submit -->
+    <button class="btn" id="submitBtn" onclick="submitChallenge()">Test Yourself</button>
+
+    <!-- Results (inline, below button) -->
+    <div class="results" id="results">
+      <div class="loading" id="loadingIndicator">
+        <div class="spinner"></div>
+        Analyzing your behavior
+      </div>
+
+      <div class="result-content" id="resultContent">
+
+        <div class="result-header">
+          <div class="verdict-badge" id="verdictBadge">—</div>
+          <div class="prob-display" id="probDisplay">—</div>
+          <div class="prob-label">Bot Probability</div>
+        </div>
+
+        <div class="prob-bar-bg">
+          <div class="prob-bar-fill" id="probBar"></div>
+        </div>
+
+        <div id="shapBlock" style="display:none">
+          <div class="shap-title">Top Contributing Signals</div>
+          <div id="shapFeatures"></div>
+          <div class="interpretation" id="interpretationText"></div>
+        </div>
+
+        <button class="btn-secondary" onclick="resetChallenge()">Try Again</button>
+
+      </div>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    HumanGuard — Behavioral signals are analyzed in real time. No personal data is stored.
+  </div>
+
+  <script>
+    const API_BASE = window.location.hostname === 'localhost'
+      ? 'http://localhost:5050'
+      : window.location.origin;
+
+    // ── Session setup ──────────────────────────────────────────────────
+    const SESSION_ID = 'demo-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+    const signals = { mouseMoves: [], clicks: [], keys: [] };
+
+    let lastMouseTime = 0;
+    let targetHit = false;
+
+    // ── Signal collection ──────────────────────────────────────────────
+    document.addEventListener('mousemove', (e) => {
+      const now = Date.now();
+      if (now - lastMouseTime >= 100) {
+        signals.mouseMoves.push({ x: e.clientX, y: e.clientY, ts: now });
+        lastMouseTime = now;
+        updateStats();
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      signals.clicks.push({ x: e.clientX, y: e.clientY, ts: Date.now(), button: e.button });
+      updateStats();
+    });
+
+    document.getElementById('typeInput').addEventListener('keydown', (e) => {
+      signals.keys.push({ key: e.key, ts: Date.now() });
+      updateStats();
+      checkTyping();
+    });
+
+    function updateStats() {
+      const total = signals.mouseMoves.length + signals.clicks.length + signals.keys.length;
+      document.getElementById('eventCount').textContent = total;
+      document.getElementById('mouseCount').textContent = signals.mouseMoves.length;
+      document.getElementById('keyCount').textContent = signals.keys.length;
+    }
+
+    function checkTyping() {
+      const val = document.getElementById('typeInput').value;
+      if (val.length >= 8) {
+        document.getElementById('dot1').classList.add('done');
+        document.getElementById('status1').textContent = 'Typing captured';
+        document.getElementById('status1').style.color = '#3fb950';
+      }
+    }
+
+    // ── Target zone ────────────────────────────────────────────────────
+    const arena = document.getElementById('targetArena');
+    const target = document.getElementById('target');
+
+    function placeTarget() {
+      const maxX = arena.clientWidth - 52;
+      const maxY = arena.clientHeight - 52;
+      target.style.left = Math.max(4, Math.floor(Math.random() * maxX)) + 'px';
+      target.style.top  = Math.max(4, Math.floor(Math.random() * maxY)) + 'px';
+    }
+
+    target.addEventListener('click', () => {
+      if (!targetHit) {
+        targetHit = true;
+        target.classList.add('hit');
+        target.textContent = '✓';
+        document.getElementById('dot2').classList.add('done');
+        document.getElementById('status2').textContent = 'Target hit!';
+        document.getElementById('status2').style.color = '#3fb950';
+      }
+    });
+
+    // ── Submit ─────────────────────────────────────────────────────────
+    async function submitChallenge() {
+      const btn = document.getElementById('submitBtn');
+      btn.disabled = true;
+      btn.textContent = 'Analyzing…';
+
+      document.getElementById('results').classList.add('visible');
+      document.getElementById('loadingIndicator').style.display = 'flex';
+      document.getElementById('resultContent').style.display = 'none';
+
+      const payload = {
+        sessionID: SESSION_ID,
+        source: 'demo',
+        label: 'human',
+        metadata: {
+          userAgent: navigator.userAgent,
+          viewportWidth: window.innerWidth,
+          viewportHeight: window.innerHeight,
+        },
+        signals: {
+          mouseMoves: signals.mouseMoves,
+          clicks: signals.clicks,
+          keys: signals.keys,
+        },
+      };
+
+      try {
+        const resp = await fetch(`${API_BASE}/api/score`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        renderResult(data);
+      } catch (err) {
+        document.getElementById('loadingIndicator').innerHTML =
+          '<span style="color:#f85149">Connection error — is the server running?</span>';
+        btn.disabled = false;
+        btn.textContent = 'Test Yourself';
+      }
+    }
+
+    // ── Result rendering ───────────────────────────────────────────────
+    function renderResult(data) {
+      document.getElementById('loadingIndicator').style.display = 'none';
+      document.getElementById('resultContent').style.display = 'block';
+
+      const prob = typeof data.prob_bot === 'number' ? data.prob_bot : 0;
+      const pct  = Math.round(prob * 100);
+
+      document.getElementById('probDisplay').textContent = pct + '%';
+
+      const bar = document.getElementById('probBar');
+      bar.style.background = probColor(prob);
+      setTimeout(() => { bar.style.width = pct + '%'; }, 50);
+
+      let verdictText, verdictClass;
+      if (prob < 0.35) {
+        verdictText = 'Looks Human';
+        verdictClass = 'verdict-human';
+      } else if (prob < 0.65) {
+        verdictText = 'Suspicious';
+        verdictClass = 'verdict-suspicious';
+      } else {
+        verdictText = 'Likely Bot';
+        verdictClass = 'verdict-bot';
+      }
+
+      const badge = document.getElementById('verdictBadge');
+      badge.textContent = verdictText;
+      badge.className = 'verdict-badge ' + verdictClass;
+      document.getElementById('probDisplay').style.color = probColor(prob);
+
+      // SHAP top 3 features
+      const expl = data.explanation;
+      if (expl && expl.top_features && expl.top_features.length > 0) {
+        const top3 = expl.top_features.slice(0, 3);
+        const maxAbs = Math.max(...top3.map(f => Math.abs(f.contribution)), 0.0001);
+
+        document.getElementById('shapFeatures').innerHTML = top3.map(f => {
+          const barPct = Math.round((Math.abs(f.contribution) / maxAbs) * 100);
+          const color  = f.contribution > 0 ? '#f85149' : '#3fb950';
+          const sign   = f.contribution > 0 ? '+' : '';
+          return `<div class="feat-row">
+            <div class="feat-name">${f.feature}</div>
+            <div class="feat-bar-wrap">
+              <div class="feat-bar-fill" style="width:${barPct}%;background:${color}"></div>
+            </div>
+            <div class="feat-contrib">${sign}${f.contribution.toFixed(3)}</div>
+          </div>`;
+        }).join('');
+
+        if (expl.interpretation) {
+          document.getElementById('interpretationText').textContent = expl.interpretation;
+        }
+        document.getElementById('shapBlock').style.display = 'block';
+
+        // Animate bars after a small delay
+        setTimeout(() => {
+          document.querySelectorAll('.feat-bar-fill').forEach(el => {
+            const w = el.style.width;
+            el.style.width = '0%';
+            requestAnimationFrame(() => { el.style.width = w; });
+          });
+        }, 100);
+      }
+
+      fetchCounter();
+    }
+
+    function probColor(p) {
+      if (p >= 0.65) return '#f85149';
+      if (p >= 0.35) return '#d29922';
+      return '#3fb950';
+    }
+
+    function resetChallenge() { window.location.reload(); }
+
+    // ── Counter ────────────────────────────────────────────────────────
+    async function fetchCounter() {
+      try {
+        const resp = await fetch(`${API_BASE}/api/dashboard-stats`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const count = typeof data.human_count === 'number' ? data.human_count : '—';
+        document.getElementById('humanCount').textContent = count.toLocaleString();
+      } catch (_) {}
+    }
+
+    // ── Boot ───────────────────────────────────────────────────────────
+    window.addEventListener('load', () => { placeTarget(); fetchCounter(); });
+  </script>
+
+</body>
+</html>

@@ -26,6 +26,10 @@ CLOUDWATCH_ENABLED=true
 SNS_ALERT_EMAIL=${SNS_ALERT_EMAIL:-"rbdishoo@gmail.com"}
 DB_MAX_CONNECTIONS=5
 
+# Optional: set FRONTEND_S3_BUCKET to upload all frontend/ files to S3
+# e.g. FRONTEND_S3_BUCKET=humanguard-frontend ./scripts/aws_deploy.sh
+FRONTEND_S3_BUCKET=${FRONTEND_S3_BUCKET:-""}
+
 # Fetch DATABASE_URL from Secrets Manager (set to empty if secret not yet created)
 DATABASE_URL=""
 if SECRET_JSON=$(aws secretsmanager get-secret-value \
@@ -238,6 +242,9 @@ echo "  GET  $API_URL/health"
 echo "  GET  $API_URL/api/stats"
 echo "  POST $API_URL/api/signals"
 echo "  POST $API_URL/api/score"
+echo "  GET  $API_URL/demo          (public demo page)"
+echo "  GET  $API_URL/simulate      (internal bot simulator)"
+echo "  GET  $API_URL/api/export    (CSV export — requires X-Export-Key header)"
 echo ""
 
 # ---------------------------------------------------------------
@@ -259,6 +266,41 @@ curl -s "$API_URL/api/stats" | python3 -m json.tool
 echo ""
 
 echo "=== Deployment complete ==="
+
+# ---------------------------------------------------------------
+# STEP 11 (optional): Upload frontend/ files to S3
+# Set FRONTEND_S3_BUCKET env var to enable static hosting of
+# demo.html, bot_simulator.html, dashboard.html, etc. on S3.
+# ---------------------------------------------------------------
+if [ -n "$FRONTEND_S3_BUCKET" ]; then
+    echo ""
+    echo "--- Step 11: Upload frontend/ files to S3 ---"
+
+    # Create bucket if it doesn't exist
+    aws s3api create-bucket \
+        --bucket "$FRONTEND_S3_BUCKET" \
+        --region "$AWS_REGION" \
+        --create-bucket-configuration LocationConstraint="$AWS_REGION" \
+        2>/dev/null \
+        || echo "Bucket '$FRONTEND_S3_BUCKET' already exists."
+
+    # Enable static website hosting
+    aws s3 website "s3://$FRONTEND_S3_BUCKET" \
+        --index-document index.html \
+        --error-document index.html
+
+    # Sync all frontend/ files with public-read ACL
+    aws s3 sync frontend/ "s3://$FRONTEND_S3_BUCKET/" \
+        --acl public-read \
+        --delete \
+        --region "$AWS_REGION"
+
+    echo "Frontend files uploaded to s3://$FRONTEND_S3_BUCKET"
+    echo "Static site URL: http://$FRONTEND_S3_BUCKET.s3-website-$AWS_REGION.amazonaws.com"
+else
+    echo ""
+    echo "(Skipping S3 frontend upload — set FRONTEND_S3_BUCKET to enable)"
+fi
 
 
 # ---------------------------------------------------------------

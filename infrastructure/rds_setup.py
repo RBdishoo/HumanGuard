@@ -160,9 +160,56 @@ def store_secret(instance: dict):
     return database_url
 
 
+# ── Schema Migration ──────────────────────────────────────────────────────────
+
+def add_source_label_columns(database_url: str):
+    """
+    Add source and label columns to sessions and predictions tables if not present.
+    Safe to run multiple times — uses IF NOT EXISTS guard.
+    """
+    import psycopg2
+
+    migrations = [
+        "ALTER TABLE sessions    ADD COLUMN IF NOT EXISTS source VARCHAR(100)",
+        "ALTER TABLE sessions    ADD COLUMN IF NOT EXISTS label  VARCHAR(10)",
+        "ALTER TABLE predictions ADD COLUMN IF NOT EXISTS source VARCHAR(100)",
+    ]
+
+    conn = psycopg2.connect(database_url)
+    try:
+        cur = conn.cursor()
+        for sql in migrations:
+            cur.execute(sql)
+            print(f"  OK: {sql}")
+        conn.commit()
+        print("Migration complete.")
+    except Exception as exc:
+        conn.rollback()
+        print(f"Migration failed: {exc}")
+        raise
+    finally:
+        conn.close()
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="HumanGuard RDS setup and migration")
+    parser.add_argument("--migrate-only", action="store_true",
+                        help="Run column migration against DATABASE_URL (no RDS creation)")
+    args = parser.parse_args()
+
+    if args.migrate_only:
+        db_url = os.environ.get("DATABASE_URL")
+        if not db_url:
+            print("ERROR: DATABASE_URL must be set for --migrate-only")
+            sys.exit(1)
+        print("=== HumanGuard Column Migration ===\n")
+        add_source_label_columns(db_url)
+        sys.exit(0)
+
     print(f"=== HumanGuard RDS Setup (region={REGION}) ===\n")
 
     sg_id = get_or_create_security_group()
@@ -176,3 +223,4 @@ if __name__ == "__main__":
     print(f"       --function-name humanguard \\")
     print(f"       --environment Variables={{DATABASE_URL={database_url},CLOUDWATCH_ENABLED=true}}")
     print("  2. Run migrations: DATABASE_URL=... python -m backend.db.migrate")
+    print("  3. Run column migration: DATABASE_URL=... python infrastructure/rds_setup.py --migrate-only")

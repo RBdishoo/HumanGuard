@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_agent      TEXT,
     viewport_width  INTEGER,
     viewport_height INTEGER,
+    source          TEXT,
+    label           TEXT,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -46,6 +48,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     label           TEXT NOT NULL,
     threshold       REAL NOT NULL DEFAULT 0.5,
     scoring_type    TEXT NOT NULL DEFAULT 'batch',
+    source          TEXT,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -98,6 +101,17 @@ class DatabaseManager:
         conn = self._get_sqlite_conn()
         conn.executescript(_SQLITE_DDL)
         conn.commit()
+        # Migration: add new columns to existing databases
+        for migration_sql in [
+            "ALTER TABLE sessions ADD COLUMN source TEXT",
+            "ALTER TABLE sessions ADD COLUMN label TEXT",
+            "ALTER TABLE predictions ADD COLUMN source TEXT",
+        ]:
+            try:
+                conn.execute(migration_sql)
+                conn.commit()
+            except Exception:
+                pass  # Column already exists — safe to ignore
         if self._sqlite_path != ":memory:":
             conn.close()
 
@@ -135,14 +149,17 @@ class DatabaseManager:
         meta = session_data.get("metadata") or {}
         raw_signals = session_data.get("signals") or {}
         batch_ts = session_data.get("timestamp")
+        source = session_data.get("source")
+        ground_truth_label = session_data.get("label")
         try:
             with self._sqlite_cursor() as cur:
                 cur.execute(
                     "INSERT OR IGNORE INTO sessions "
-                    "(session_id, user_agent, viewport_width, viewport_height) "
-                    "VALUES (?, ?, ?, ?)",
+                    "(session_id, user_agent, viewport_width, viewport_height, source, label) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
                     (session_id, meta.get("userAgent"),
-                     meta.get("viewportWidth"), meta.get("viewportHeight")),
+                     meta.get("viewportWidth"), meta.get("viewportHeight"),
+                     source, ground_truth_label),
                 )
                 cur.execute(
                     "INSERT INTO signal_batches (session_id, raw_signals, batch_timestamp) "
@@ -154,13 +171,14 @@ class DatabaseManager:
 
     def save_prediction(self, session_id: str, score: float, is_bot: bool,
                         features=None, threshold: float = 0.5,
-                        scoring_type: str = "batch"):
+                        scoring_type: str = "batch", source: str = None):
         """Persist a model prediction."""
         label = "bot" if is_bot else "human"
 
         if self._use_postgres:
             try:
-                self._pg.save_prediction(session_id, score, label, threshold, scoring_type)
+                self._pg.save_prediction(session_id, score, label, threshold, scoring_type,
+                                         source=source)
             except Exception as exc:
                 logger.warning("DB save_prediction failed: %s", exc)
             return
@@ -173,9 +191,9 @@ class DatabaseManager:
                 )
                 cur.execute(
                     "INSERT INTO predictions "
-                    "(session_id, prob_bot, label, threshold, scoring_type) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (session_id, score, label, threshold, scoring_type),
+                    "(session_id, prob_bot, label, threshold, scoring_type, source) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (session_id, score, label, threshold, scoring_type, source),
                 )
         except Exception as exc:
             logger.warning("SQLite save_prediction failed: %s", exc)
