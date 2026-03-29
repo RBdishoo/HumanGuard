@@ -21,3 +21,4 @@ psycopg2-binary
 shap
 awslambdaric
 flask-cors
+boto3

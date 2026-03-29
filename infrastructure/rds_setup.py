@@ -104,7 +104,7 @@ def get_or_create_rds(sg_id: str) -> dict:
         StorageType="gp2",
         PubliclyAccessible=True,
         VpcSecurityGroupIds=[sg_id],
-        BackupRetentionPeriod=7,
+        BackupRetentionPeriod=0,
         MultiAZ=False,
         Tags=[{"Key": "Project", "Value": "HumanGuard"}],
     )

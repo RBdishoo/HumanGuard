@@ -129,12 +129,26 @@ def save_signal_batch(batch_data):
 
 
 def save_prediction(session_id, prob_bot, label, threshold, scoring_type="batch"):
-    """Insert a prediction row."""
-    execute_query(
-        """INSERT INTO predictions (session_id, prob_bot, label, threshold, scoring_type)
-           VALUES (%s, %s, %s, %s, %s)""",
-        (session_id, prob_bot, label, threshold, scoring_type),
-    )
+    """Insert a prediction row, ensuring the session row exists first."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        # Ensure session exists (predictions has a FK to sessions)
+        cur.execute(
+            "INSERT INTO sessions (session_id) VALUES (%s) ON CONFLICT (session_id) DO NOTHING",
+            (session_id,),
+        )
+        cur.execute(
+            """INSERT INTO predictions (session_id, prob_bot, label, threshold, scoring_type)
+               VALUES (%s, %s, %s, %s, %s)""",
+            (session_id, prob_bot, label, threshold, scoring_type),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        release_connection(conn)
 
 
 def reset():

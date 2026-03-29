@@ -140,27 +140,33 @@ def _load_scoring_bundle():
         model = joblib.load(model_path)
         scaler = joblib.load(scaler_path)
 
-    # Load SHAP explainer if shap is installed
-    explainer = None
-    try:
-        import shap
-        explainer = shap.TreeExplainer(model)
-        logger.info("SHAP TreeExplainer loaded successfully")
-    except ImportError:
-        logger.warning("shap not installed — SHAP explanations will be unavailable")
-    except Exception as exc:
-        logger.warning("Failed to create SHAP explainer: %s", exc)
-
+    # explainer is created lazily on first SHAP request (shap.TreeExplainer is
+    # expensive to initialize and would blow Lambda's 10s init phase limit).
     _scoring_bundle = {
         "model": model,
         "scaler": scaler,
         "feature_names": feature_names,
         "threshold": threshold,
-        "explainer": explainer,
+        "explainer": None,  # populated on first explain call by _get_shap_explainer()
         # Keep a single extractor instance to reduce per-request overhead.
         "extractor": FeatureExtractor(),
     }
     return _scoring_bundle
+
+
+def _get_shap_explainer(bundle: dict):
+    """Return the SHAP TreeExplainer, creating it on first call (lazy init)."""
+    if bundle["explainer"] is not None:
+        return bundle["explainer"]
+    try:
+        import shap
+        bundle["explainer"] = shap.TreeExplainer(bundle["model"])
+        logger.info("SHAP TreeExplainer created (lazy init)")
+    except ImportError:
+        logger.warning("shap not installed — SHAP explanations unavailable")
+    except Exception as exc:
+        logger.warning("Failed to create SHAP explainer: %s", exc)
+    return bundle["explainer"]
 
 
 def _log_prediction_local(session_id, prob_bot, label, threshold,
@@ -343,7 +349,7 @@ def _compute_trend(scores):
 
 def _build_shap_explanation(bundle, x_scaled, label):
     """Build SHAP explanation block for a single scaled feature vector."""
-    explainer = bundle.get("explainer")
+    explainer = _get_shap_explainer(bundle)
     if explainer is None:
         return None
     try:
