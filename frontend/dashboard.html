@@ -191,6 +191,46 @@
       padding: 24px 0;
     }
 
+    /* ── Model Info ── */
+    .model-info-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .mi-cell { }
+    .mi-label {
+      font-size: 10px;
+      color: #484f58;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+    .mi-value {
+      font-size: 18px;
+      font-weight: bold;
+      color: #c9d1d9;
+      line-height: 1.1;
+    }
+    .mi-value.blue  { color: #58a6ff; }
+    .mi-value.green { color: #3fb950; }
+    .mi-value.small { font-size: 13px; }
+    .mi-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 9px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      background: #1c2d1e;
+      color: #3fb950;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    @media (max-width: 900px) {
+      .model-info-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
     @media (max-width: 900px) {
       .stats-bar { grid-template-columns: repeat(2, 1fr); }
       .main-grid { grid-template-columns: 1fr; }
@@ -250,6 +290,12 @@
   <div class="section">
     <h2>Top Flagged Features — Bot Detections (SHAP)</h2>
     <div id="featImportance"><div class="empty-msg">No bot detections with SHAP data yet</div></div>
+  </div>
+
+  <!-- F) Model Version Info -->
+  <div class="section" id="modelInfoSection" style="margin-top:16px">
+    <h2>Active Model</h2>
+    <div id="modelInfoContent"><div class="empty-msg">Loading model info…</div></div>
   </div>
 
   <script>
@@ -455,6 +501,66 @@
       } catch (_) {}
     }
 
+    // ── Model Info Card ───────────────────────────────────────────────────────
+
+    function fmtDate(iso) {
+      if (!iso) return '—';
+      try {
+        return new Date(iso).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+      } catch (_) { return iso; }
+    }
+
+    function fmtPct(v) {
+      return typeof v === 'number' ? (v * 100).toFixed(1) + '%' : '—';
+    }
+
+    async function fetchModelInfo() {
+      try {
+        const resp = await fetch(`${API_BASE}/api/model-info`);
+        if (!resp.ok) return;
+        const d = await resp.json();
+
+        const version   = d.version || '—';
+        const isChamp   = d.champion !== false;
+        const modelType = d.model_type || '—';
+        const accuracy  = fmtPct(d.accuracy);
+        const f1        = fmtPct(d.f1);
+        const trainDate = fmtDate(d.training_date);
+        const samples   = d.training_samples != null
+          ? Number(d.training_samples).toLocaleString() : '—';
+        const badgeHtml = isChamp ? '<span class="mi-badge">champion</span>' : '';
+
+        document.getElementById('modelInfoContent').innerHTML = `
+          <div class="model-info-grid">
+            <div class="mi-cell">
+              <div class="mi-label">Version</div>
+              <div class="mi-value blue">${version}${badgeHtml}</div>
+            </div>
+            <div class="mi-cell">
+              <div class="mi-label">Type</div>
+              <div class="mi-value small">${modelType}</div>
+            </div>
+            <div class="mi-cell">
+              <div class="mi-label">Accuracy</div>
+              <div class="mi-value green">${accuracy}</div>
+            </div>
+            <div class="mi-cell">
+              <div class="mi-label">F1 Score</div>
+              <div class="mi-value">${f1}</div>
+            </div>
+            <div class="mi-cell">
+              <div class="mi-label">Training Date</div>
+              <div class="mi-value small">${trainDate}</div>
+            </div>
+            <div class="mi-cell">
+              <div class="mi-label">Training Samples</div>
+              <div class="mi-value small">${samples}</div>
+            </div>
+          </div>
+        `;
+      } catch (_) {}
+    }
+
     window.addEventListener('resize', () => {
       if (_lastData) renderDriftChart(_lastData.recent_predictions, _lastData.threshold);
     });
@@ -462,6 +568,7 @@
     // Boot
     refresh();
     initModel();
+    fetchModelInfo();
     setInterval(refresh, REFRESH_MS);
   </script>
 </body>

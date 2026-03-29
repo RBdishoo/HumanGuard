@@ -289,9 +289,8 @@ if [ -n "$FRONTEND_S3_BUCKET" ]; then
         --index-document index.html \
         --error-document index.html
 
-    # Sync all frontend/ files with public-read ACL
+    # Sync all frontend/ files (bucket policy handles public read — ACL not needed)
     aws s3 sync frontend/ "s3://$FRONTEND_S3_BUCKET/" \
-        --acl public-read \
         --delete \
         --region "$AWS_REGION"
 

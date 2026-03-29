@@ -98,18 +98,40 @@ def _load_scoring_bundle():
     """
     Lazily load model/scaler/feature names for /api/score.
 
-    Expected artifacts created by models/run_training.py:
-      - models/trained/RandomForest.pkl
-      - models/trained/scaler.pkl
-      - models/trained/feature_names.json
+    Load order:
+      1. ModelRegistry (S3) if MODEL_BUCKET env var is set.
+      2. Local disk artifacts in models/trained/ (fallback).
     """
     global _scoring_bundle
     if _scoring_bundle is not None:
         return _scoring_bundle
 
     import joblib
-    from features.feature_extractor import FeatureExtractor  # ensure feature code is importable
+    from features.feature_extractor import FeatureExtractor
 
+    # ── Attempt registry load ──────────────────────────────────────────────────
+    model_bucket = os.environ.get("MODEL_BUCKET")
+    if model_bucket:
+        try:
+            from model_registry import ModelRegistry
+            registry = ModelRegistry(bucket=model_bucket)
+            reg_bundle = registry.load("latest")
+            _scoring_bundle = {
+                "model": reg_bundle["model"],
+                "scaler": reg_bundle["scaler"],
+                "feature_names": reg_bundle["feature_names"],
+                "threshold": reg_bundle["threshold"],
+                "explainer": _SHAP_PENDING,
+                "extractor": FeatureExtractor(),
+                "_registry_version": reg_bundle.get("version"),
+                "_registry_metadata": reg_bundle.get("metadata", {}),
+            }
+            logger.info("Loaded model from registry: %s", reg_bundle.get("version"))
+            return _scoring_bundle
+        except Exception as exc:
+            logger.warning("Registry load failed, falling back to local disk: %s", exc)
+
+    # ── Local disk fallback ────────────────────────────────────────────────────
     model_path = MODEL_DIR / f"{MODEL_NAME}.pkl"
     scaler_path = MODEL_DIR / "scaler.pkl"
     feature_names_path = MODEL_DIR / "feature_names.json"
@@ -141,17 +163,15 @@ def _load_scoring_bundle():
         model = joblib.load(model_path)
         scaler = joblib.load(scaler_path)
 
-    # explainer is created lazily on first SHAP request (shap.TreeExplainer is
-    # expensive to initialize and would blow Lambda's 10s init phase limit).
-    # _SHAP_PENDING = "not yet attempted"; None = "attempted and unavailable".
     _scoring_bundle = {
         "model": model,
         "scaler": scaler,
         "feature_names": feature_names,
         "threshold": threshold,
         "explainer": _SHAP_PENDING,
-        # Keep a single extractor instance to reduce per-request overhead.
         "extractor": FeatureExtractor(),
+        "_registry_version": None,
+        "_registry_metadata": {},
     }
     return _scoring_bundle
 
@@ -288,12 +308,18 @@ def scoreSignals():
         except Exception as exc:
             logger.warning("Failed to save prediction to PostgreSQL: %s", exc)
 
-        # Persist session metadata (source/label) when provided via demo or simulator
+        # Persist session metadata (source/label) when provided via demo or simulator.
+        # Also save raw signals to JSONL so demo/simulator batches are available for
+        # retraining via scripts/retrain.py.
         if payload_source or payload_ground_truth:
             try:
                 db_manager.save_session(data)
             except Exception as exc:
                 logger.warning("Failed to save session metadata from score endpoint: %s", exc)
+            try:
+                collector.saveSignalBatch(data)
+            except Exception as exc:
+                logger.warning("Failed to save signals from score endpoint: %s", exc)
 
         response = {
             "success": True,
@@ -757,6 +783,66 @@ def dashboardStats():
 def serveDashboard():
     """GET /dashboard — Serves the live monitoring dashboard."""
     return send_from_directory('../frontend', 'dashboard.html')
+
+
+@app.route('/api/model-info', methods=['GET'])
+def modelInfo():
+    """
+    GET /api/model-info
+    Returns metadata for the currently active model (champion version from registry,
+    or local model info when no registry is configured).
+    """
+    try:
+        # Try to get live info from the loaded scoring bundle first
+        bundle = None
+        try:
+            bundle = _load_scoring_bundle()
+        except Exception:
+            pass
+
+        if bundle and bundle.get("_registry_version"):
+            meta = bundle.get("_registry_metadata", {})
+            return jsonify({
+                "version": bundle["_registry_version"],
+                "source": "registry",
+                "accuracy": meta.get("accuracy"),
+                "precision": meta.get("precision"),
+                "recall": meta.get("recall"),
+                "f1": meta.get("f1"),
+                "roc_auc": meta.get("roc_auc"),
+                "training_date": meta.get("training_date"),
+                "training_samples": meta.get("training_samples"),
+                "model_type": meta.get("model_type", MODEL_NAME),
+                "champion": meta.get("champion", True),
+            }), 200
+
+        # Fallback: read local model_comparison.json
+        comparison_path = MODEL_DIR / "model_comparison.json"
+        if comparison_path.exists():
+            with open(comparison_path) as f:
+                comparison = json.load(f)
+            winner = comparison.get("winner", MODEL_NAME)
+            models = comparison.get("models", [])
+            winner_metrics = next((m for m in models if m.get("model") == winner), {})
+            return jsonify({
+                "version": "local",
+                "source": "local",
+                "accuracy": winner_metrics.get("accuracy"),
+                "precision": winner_metrics.get("precision"),
+                "recall": winner_metrics.get("recall"),
+                "f1": winner_metrics.get("f1"),
+                "roc_auc": winner_metrics.get("roc_auc"),
+                "training_date": None,
+                "training_samples": None,
+                "model_type": winner,
+                "champion": True,
+            }), 200
+
+        return jsonify({"version": "unknown", "source": "none"}), 200
+
+    except Exception as exc:
+        logger.exception("Error in /api/model-info")
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route('/demo', methods=['GET'])
