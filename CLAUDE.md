@@ -128,6 +128,22 @@ Completed:
 - Live dashboard at GET /dashboard — dark-theme canvas chart, live feed, feature importance bars
 - Local predictions log at backend/data/predictions_log.jsonl — always written; used as dashboard fallback when PostgreSQL is unavailable
 
+### Monitoring
+- CloudWatch namespace: `HumanGuard`
+- Metrics emitted by `backend/monitoring.py` (module-level `metrics` singleton):
+  - `score_requests` — count of scored batches
+  - `bot_detections` / `human_detections` — per-label counts
+  - `prediction_latency_ms` — end-to-end scoring time in milliseconds
+  - `validation_errors` — count of rejected payloads (isValidSignalBatch failures)
+  - `lambda_errors` — count of unhandled exceptions in /api/score
+- Metrics are emitted only when `CLOUDWATCH_ENABLED=true` env var is set; no-op in local dev
+- Alarms (created by `infrastructure/cloudwatch_alarms.py`, run once at deploy time):
+  - `HumanGuard-BotRateSpike` — bot_detections/score_requests > 80% for 5 min
+  - `HumanGuard-HighLatency` — p95 latency > 2000ms for 3 consecutive minutes
+  - `HumanGuard-ValidationErrorRate` — validation_errors > 10 in 5 min
+  - `HumanGuard-ErrorRate` — lambda_errors > 5 in 5 min
+- All alarms publish to SNS topic `HumanGuard-Alerts`; subscribe via `SNS_ALERT_EMAIL` env var
+
 ### Deployment
 - Dockerfile: python:3.11-slim, PORT=8080, `python -m backend.app`
 - AWS deploy script: `scripts/aws_deploy.sh` (ECR + Lambda + API Gateway)

@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from collectors.signal_collector import SignalCollector
 from utils.helpers import isValidSignalBatch, normalizeSignalBatch, formatTimestamp
+from monitoring import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +202,7 @@ def scoreSignals():
         data = normalizeSignalBatch(data)
 
         if not isValidSignalBatch(data):
+            metrics.record_validation_error()
             return jsonify({
                 "Error": "Invalid signal batch format",
                 "received__keys": list(data.keys()),
@@ -280,12 +282,15 @@ def scoreSignals():
             response_time_ms=_response_time_ms,
             explanation=response.get("explanation"),
         )
+        metrics.record_prediction(is_bot=(label == "bot"), latency_ms=_response_time_ms)
 
         return jsonify(response), 200
 
     except FileNotFoundError as e:
+        metrics.record_lambda_error()
         return jsonify({"Error": str(e)}), 503
     except Exception as e:
+        metrics.record_lambda_error()
         logger.exception("Error scoring signals")
         return jsonify({"Error": f"Server error: {str(e)}"}), 500
 
@@ -514,6 +519,7 @@ def saveSignals():
 
         #Validate structure
         if not isValidSignalBatch(data):
+            metrics.record_validation_error()
             return jsonify({
                 "Error": "Invalid signal batch format",
                 "received__keys": list(data.keys()),

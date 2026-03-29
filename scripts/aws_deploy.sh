@@ -22,6 +22,8 @@ FUNCTION_NAME=humanguard
 ROLE_NAME=humanguard-lambda-role
 IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$REPO_NAME:latest
 API_NAME=humanguard-api
+CLOUDWATCH_ENABLED=true
+SNS_ALERT_EMAIL=${SNS_ALERT_EMAIL:-""}
 
 echo "=== HumanGuard AWS Deployment ==="
 echo "Account:  $AWS_ACCOUNT_ID"
@@ -136,7 +138,7 @@ aws lambda create-function \
     --role "$ROLE_ARN" \
     --memory-size 1024 \
     --timeout 30 \
-    --environment "Variables={PORT=8080}" \
+    --environment "Variables={PORT=8080,CLOUDWATCH_ENABLED=$CLOUDWATCH_ENABLED,SNS_ALERT_EMAIL=$SNS_ALERT_EMAIL}" \
     --region "$AWS_REGION"
 echo "Lambda function '$FUNCTION_NAME' created."
 
