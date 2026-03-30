@@ -1,11 +1,20 @@
 import pandas as pd
 import numpy as np
-from typing import Dict, List
+from typing import Dict, List, Tuple
 import logging
 
 from .feature_utils import MouseTrajectoryUtils, KeystrokeUtils
 
 logger = logging.getLogger(__name__)
+
+# Features used for cross-session temporal comparison.
+# Must all exist in extractBatchFeatures() output.
+_TEMPORAL_FEATURES = [
+    'keyInterKeyDelayMeanMs', 'keyInterKeyDelayStdMs', 'keystroke_timing_regularity',
+    'mousePathEfficiency', 'mouseAngularVelocityStd', 'mouseStdVelocity',
+    'mouse_acceleration_variance', 'mouseHoverTimeRatio', 'mouseAvgVelocity',
+    'typing_rhythm_autocorrelation',
+]
 
 class FeatureExtractor:
     """
@@ -431,6 +440,87 @@ class FeatureExtractor:
             features['session_phase_consistency'] = 0.0
 
         return features
+
+    # ── Session-level temporal methods ────────────────────────────────────────
+    # These accept a list of signal dicts (one per batch) for a whole session.
+    # They are used by the session blender and /api/session-score.
+
+    def split_session_features(self, batches: List[dict]) -> Tuple[Dict, Dict]:
+        """
+        Split session batches into first and second half.
+        Returns (first_half_avg_features, second_half_avg_features) dicts
+        keyed by _TEMPORAL_FEATURES.
+
+        batches: list of signal dicts, each with 'mouseMoves', 'clicks', 'keys'.
+        """
+        n = len(batches)
+        zero = {k: 0.0 for k in _TEMPORAL_FEATURES}
+        if n < 2:
+            return zero, zero
+
+        mid = n // 2
+
+        def _avg(batch_list: List[dict]) -> Dict:
+            if not batch_list:
+                return {k: 0.0 for k in _TEMPORAL_FEATURES}
+            all_feats = [self.extractBatchFeatures(b) for b in batch_list]
+            return {k: float(np.mean([f.get(k, 0.0) for f in all_feats]))
+                    for k in _TEMPORAL_FEATURES}
+
+        return _avg(batches[:mid]), _avg(batches[mid:])
+
+    def temporal_drift_score(self, batches: List[dict]) -> float:
+        """
+        Normalised drift between the first-half and second-half feature vectors.
+        Returns [0, 1]; high = large behaviour change (adaptive bot), low = consistent.
+        """
+        first, second = self.split_session_features(batches)
+        f1 = np.array([first[k]  for k in _TEMPORAL_FEATURES], dtype=float)
+        f2 = np.array([second[k] for k in _TEMPORAL_FEATURES], dtype=float)
+        # Normalise each feature by the larger of |f1|, |f2|, or 1
+        scale = np.maximum(np.maximum(np.abs(f1), np.abs(f2)), 1.0)
+        f1n = f1 / scale
+        f2n = f2 / scale
+        dist = float(np.linalg.norm(f1n - f2n) / np.sqrt(len(_TEMPORAL_FEATURES)))
+        return float(min(dist, 1.0))
+
+    def early_late_timing_delta(self, batches: List[dict]) -> float:
+        """
+        Absolute difference in mean inter-key delay between the first 30 % and
+        last 30 % of batches. High = bot that changes keystroke speed mid-session.
+        """
+        n = len(batches)
+        if n < 3:
+            return 0.0
+
+        cut = max(1, round(n * 0.3))
+
+        def _mean_delay(batch_list: List[dict]) -> float:
+            delays: List[float] = []
+            for b in batch_list:
+                keys = b.get('keys', []) or []
+                if len(keys) >= 2:
+                    delays.extend(self.utilsKey.interKeyDelays(keys))
+            return float(np.mean(delays)) if delays else 0.0
+
+        early = _mean_delay(batches[:cut])
+        late  = _mean_delay(batches[n - cut:])
+        return float(abs(late - early))
+
+    def behavior_consistency_score(self, batches: List[dict]) -> float:
+        """
+        Cosine similarity between first-half and second-half feature vectors.
+        Returns [0, 1]; high ≈ 1.0 = consistent (human or consistent bot),
+        low = behaviour changed mid-session (adaptive bot).
+        """
+        first, second = self.split_session_features(batches)
+        v1 = np.array([first[k]  for k in _TEMPORAL_FEATURES], dtype=float)
+        v2 = np.array([second[k] for k in _TEMPORAL_FEATURES], dtype=float)
+        n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
+        if n1 < 1e-8 or n2 < 1e-8:
+            return 1.0
+        cosine = float(np.dot(v1, v2) / (n1 * n2))
+        return float(max(0.0, min(1.0, cosine)))
 
 
 if __name__ == "__main__":

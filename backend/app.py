@@ -163,6 +163,20 @@ def _load_scoring_bundle():
         model = joblib.load(model_path)
         scaler = joblib.load(scaler_path)
 
+    # Load optional session-level blender (catches adaptive bots via temporal drift)
+    session_blender = None
+    session_blender_features = None
+    blender_path   = MODEL_DIR / "session_blender.pkl"
+    bl_feats_path  = MODEL_DIR / "session_blender_features.json"
+    if blender_path.exists() and bl_feats_path.exists():
+        try:
+            session_blender = joblib.load(blender_path)
+            with open(bl_feats_path) as _f:
+                session_blender_features = json.load(_f)
+            logger.info("Loaded session blender")
+        except Exception as _exc:
+            logger.warning("Failed to load session blender: %s", _exc)
+
     _scoring_bundle = {
         "model": model,
         "scaler": scaler,
@@ -172,6 +186,8 @@ def _load_scoring_bundle():
         "extractor": FeatureExtractor(),
         "_registry_version": None,
         "_registry_metadata": {},
+        "session_blender": session_blender,
+        "session_blender_features": session_blender_features,
     }
     return _scoring_bundle
 
@@ -465,7 +481,6 @@ def _session_score_logic(session_id):
         # Weighted average — linear weights giving later batches higher weight
         weights = np.arange(1, batch_count + 1, dtype=float)
         session_prob_bot = float(np.average(batch_scores, weights=weights))
-        label = "bot" if session_prob_bot >= threshold else "human"
 
         # Drift analysis
         scores_arr = np.array(batch_scores)
@@ -475,6 +490,45 @@ def _session_score_logic(session_id):
             "max_prob_bot": round(float(np.max(scores_arr)), 4),
             "mean_prob_bot": round(float(np.mean(scores_arr)), 4),
         }
+
+        # ── Temporal blending for long sessions (≥ 10 batches) ───────────
+        # Detects adaptive bots that behave human-like early, bot-like later.
+        if batch_count >= 10:
+            extractor        = bundle["extractor"]
+            temporal_drift   = extractor.temporal_drift_score(batches)
+            delta_ms         = extractor.early_late_timing_delta(batches)
+            consistency      = extractor.behavior_consistency_score(batches)
+
+            blender     = bundle.get("session_blender")
+            bl_features = bundle.get("session_blender_features") or []
+
+            if blender is not None and bl_features:
+                feat_map = {
+                    "avg_batch_prob":       session_prob_bot,
+                    "temporal_drift":       temporal_drift,
+                    "early_late_delta_ms":  delta_ms,
+                    "behavior_consistency": consistency,
+                }
+                x_meta = np.array([[feat_map.get(f, 0.0) for f in bl_features]])
+                session_prob_bot = float(
+                    np.clip(blender.predict_proba(x_meta)[0, 1], 0.0, 1.0)
+                )
+            else:
+                # Fixed-rule fallback when no blender is available
+                norm_delta         = float(min(delta_ms / 100.0, 1.0))
+                temporal_suspicion = float(np.clip(
+                    2.0 * temporal_drift + 0.4 * norm_delta + 0.3 * (1.0 - consistency),
+                    0.0, 1.0,
+                ))
+                session_prob_bot = float(np.clip(
+                    0.65 * session_prob_bot + 0.35 * temporal_suspicion, 0.0, 1.0
+                ))
+
+            drift["temporal_drift"]       = round(temporal_drift, 4)
+            drift["early_late_delta_ms"]  = round(delta_ms, 1)
+            drift["behavior_consistency"] = round(consistency, 4)
+
+        label = "bot" if session_prob_bot >= threshold else "human"
 
         # Save to PostgreSQL if available
         try:

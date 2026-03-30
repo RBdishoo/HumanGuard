@@ -41,6 +41,7 @@ HARD_LAB_CSV  = ROOT / "backend/data/raw/hard_test_labels.csv"
 
 sys.path.insert(0, str(ROOT))
 from backend.features.dataset_builder import DatasetBuilder
+from backend.features.feature_extractor import FeatureExtractor
 from models.dataset import ModelDataset
 
 
@@ -54,7 +55,21 @@ def load_champion():
     scaler = joblib.load(TRAINED_DIR / "scaler.pkl")
     with open(TRAINED_DIR / "feature_names.json") as f:
         feat_names = json.load(f)
-    return model, scaler, feat_names, name, comp
+
+    # Load optional session blender
+    session_blender  = None
+    bl_features      = None
+    blender_path     = TRAINED_DIR / "session_blender.pkl"
+    bl_feats_path    = TRAINED_DIR / "session_blender_features.json"
+    if blender_path.exists() and bl_feats_path.exists():
+        try:
+            session_blender = joblib.load(blender_path)
+            with open(bl_feats_path) as f:
+                bl_features = json.load(f)
+        except Exception:
+            pass
+
+    return model, scaler, feat_names, name, comp, session_blender, bl_features
 
 
 # ── Easy test set ─────────────────────────────────────────────────────────
@@ -171,6 +186,123 @@ def hard_test_metrics(model, scaler, feat_names: list) -> dict:
     }
 
 
+# ── Session-level hard test (adaptive bot detection) ─────────────────────
+
+def hard_test_session_metrics(model, scaler, feat_names: list,
+                               session_blender, bl_features) -> dict:
+    """
+    Evaluate the hard test set at SESSION level.
+
+    Each session is scored as a unit: per-batch probabilities are linearly
+    weighted (later batches carry more weight), then the session blender
+    (if available) blends in temporal drift features.
+
+    This properly measures adaptive_bot detection, where batch-level scoring
+    counts 50 % of batches as false negatives (the human-phase batches),
+    but session-level scoring correctly classifies the whole session.
+    """
+    import re
+    from collections import defaultdict
+
+    if not HARD_SIG_JSONL.exists():
+        return {}
+
+    # Load raw signals grouped by session
+    sessions: dict = defaultdict(list)
+    with open(HARD_SIG_JSONL) as f:
+        for line in f:
+            try:
+                rec = json.loads(line.strip())
+                sid = rec.get("sessionID")
+                sig = rec.get("signals") or {}
+                if sid:
+                    sessions[sid].append(sig)
+            except Exception:
+                continue
+
+    hard_labels = pd.read_csv(HARD_LAB_CSV)
+    label_map   = dict(zip(hard_labels["sessionID"], hard_labels["label"]))
+    extractor   = FeatureExtractor()
+
+    session_rows = []
+    for sid, sig_list in sessions.items():
+        y_true = 1 if label_map.get(sid) == "bot" else 0
+
+        # Per-batch scores
+        batch_probs = []
+        for sig in sig_list:
+            feats = extractor.extractBatchFeatures(sig)
+            x_row = np.array([[float(feats.get(n, 0.0)) for n in feat_names]])
+            x_sc  = scaler.transform(x_row)
+            batch_probs.append(float(model.predict_proba(x_sc)[0, 1]))
+
+        n       = len(batch_probs)
+        weights = np.arange(1, n + 1, dtype=float)
+        avg_prob = float(np.average(batch_probs, weights=weights))
+
+        # Temporal blending for sessions with ≥ 10 batches
+        if n >= 10 and session_blender is not None and bl_features:
+            drift       = extractor.temporal_drift_score(sig_list)
+            delta_ms    = extractor.early_late_timing_delta(sig_list)
+            consistency = extractor.behavior_consistency_score(sig_list)
+            feat_map    = {
+                "avg_batch_prob":       avg_prob,
+                "temporal_drift":       drift,
+                "early_late_delta_ms":  delta_ms,
+                "behavior_consistency": consistency,
+            }
+            x_meta   = np.array([[feat_map.get(f, 0.0) for f in bl_features]])
+            final_prob = float(np.clip(session_blender.predict_proba(x_meta)[0, 1], 0.0, 1.0))
+        elif n >= 10:
+            # Fixed-rule fallback
+            drift       = extractor.temporal_drift_score(sig_list)
+            delta_ms    = extractor.early_late_timing_delta(sig_list)
+            consistency = extractor.behavior_consistency_score(sig_list)
+            norm_delta  = float(min(delta_ms / 100.0, 1.0))
+            temp_susp   = float(np.clip(
+                2.0 * drift + 0.4 * norm_delta + 0.3 * (1.0 - consistency), 0.0, 1.0
+            ))
+            final_prob = float(np.clip(0.65 * avg_prob + 0.35 * temp_susp, 0.0, 1.0))
+        else:
+            final_prob = avg_prob
+
+        m       = re.search(r"hardbot_([a-z_]+)_\d{8}_", sid)
+        pattern = m.group(1) if m else "unknown"
+        session_rows.append({
+            "sessionID": sid,
+            "pattern":   pattern,
+            "y_true":    y_true,
+            "final_prob": final_prob,
+            "y_pred":    1 if final_prob >= 0.5 else 0,
+        })
+
+    df = pd.DataFrame(session_rows)
+    if df.empty:
+        return {}
+
+    y_t = df["y_true"].values
+    y_p = df["y_pred"].values
+
+    per_pattern = {}
+    for pat in df["pattern"].unique():
+        mask = df["pattern"] == pat
+        sub  = df[mask]
+        per_pattern[pat] = {
+            "n":             int(mask.sum()),
+            "detection_rate": float(recall_score(sub["y_true"], sub["y_pred"], zero_division=0)),
+            "f1":            float(f1_score(sub["y_true"], sub["y_pred"], zero_division=0)),
+        }
+
+    return {
+        "n_sessions":  len(df),
+        "accuracy":    float(accuracy_score(y_t, y_p)),
+        "precision":   float(precision_score(y_t, y_p, zero_division=0)),
+        "recall":      float(recall_score(y_t, y_p, zero_division=0)),
+        "f1":          float(f1_score(y_t, y_p, zero_division=0)),
+        "per_pattern": per_pattern,
+    }
+
+
 # ── Cross-validation ──────────────────────────────────────────────────────
 
 def cv_metrics(feat_names: list) -> dict:
@@ -227,9 +359,11 @@ def main():
     log("=" * 70)
 
     # Load champion
-    model, scaler, feat_names, champion_name, comp = load_champion()
-    log(f"\n  Champion model : {champion_name}")
-    log(f"  Feature count  : {len(feat_names)}")
+    model, scaler, feat_names, champion_name, comp, session_blender, bl_features = load_champion()
+    blender_status = "loaded" if session_blender is not None else "not found"
+    log(f"\n  Champion model  : {champion_name}")
+    log(f"  Feature count   : {len(feat_names)}")
+    log(f"  Session blender : {blender_status}")
 
     # ── CV ──
     log("\n── 1. 5-FOLD STRATIFIED CROSS-VALIDATION ──────────────────────────")
@@ -261,25 +395,61 @@ def main():
     log(_cm_str(easy['cm']))
     log()
 
-    # ── Hard test ──
-    log("── 3. HARD TEST SET (adversarial bots, NOT in training) ───────────")
-    log("  (Realistic production lower-bound)")
+    # ── Hard test — batch level ──
+    log("── 3a. HARD TEST SET — BATCH-LEVEL SCORING ────────────────────────")
+    log("  (Each batch scored independently — adaptive_bot under-detected here)")
     log()
     hard = hard_test_metrics(model, scaler, feat_names)
-    log(f"  Samples   : {hard['n_samples']}")
+    log(f"  Samples   : {hard['n_samples']} batches")
     log(f"  Accuracy  : {hard['accuracy']:.4f}")
     log(f"  Precision : {hard['precision']:.4f}")
     log(f"  Recall    : {hard['recall']:.4f}  ← fraction of adversarial bots caught")
     log(f"  F1        : {hard['f1']:.4f}")
-    log(f"  AUC-ROC   : {hard['roc_auc']:.4f}")
     log(f"  Confusion matrix:")
     log(_cm_str(hard['cm']))
     log()
-    log("  Per-pattern breakdown (detection_rate = recall for bots):")
     log(f"  {'Pattern':<22} {'N':>6} {'DetRate':>9} {'F1':>8}")
     log("  " + "-" * 47)
-    for pat, v in hard["per_pattern"].items():
+    batch_per_pattern = hard["per_pattern"]
+    for pat, v in batch_per_pattern.items():
         log(f"  {pat:<22} {v['n']:>6} {v['detection_rate']:>9.4f} {v['f1']:>8.4f}")
+    log()
+
+    # ── Hard test — session level ──
+    log("── 3b. HARD TEST SET — SESSION-LEVEL SCORING (batch + temporal) ───")
+    log("  (Sessions scored as a unit; adaptive_bot properly evaluated here)")
+    log()
+    sess = hard_test_session_metrics(model, scaler, feat_names,
+                                     session_blender, bl_features)
+    if sess:
+        log(f"  Sessions  : {sess['n_sessions']}")
+        log(f"  Accuracy  : {sess['accuracy']:.4f}")
+        log(f"  Precision : {sess['precision']:.4f}")
+        log(f"  Recall    : {sess['recall']:.4f}  ← fraction of adversarial sessions caught")
+        log(f"  F1        : {sess['f1']:.4f}")
+        log()
+        log(f"  {'Pattern':<22} {'N':>6} {'DetRate':>9} {'F1':>8}")
+        log("  " + "-" * 47)
+        sess_per_pattern = sess["per_pattern"]
+        for pat, v in sess_per_pattern.items():
+            log(f"  {pat:<22} {v['n']:>6} {v['detection_rate']:>9.4f} {v['f1']:>8.4f}")
+    else:
+        log("  (No session-level data available)")
+        sess_per_pattern = {}
+    log()
+
+    # ── Before / after comparison ──
+    log("── 3c. BEFORE / AFTER COMPARISON (batch → session scoring) ─────────")
+    log()
+    log(f"  {'Pattern':<22} {'Batch DetRate':>14} {'Session DetRate':>16} {'Delta':>8}")
+    log("  " + "-" * 62)
+    all_patterns = sorted(set(list(batch_per_pattern.keys()) + list(sess_per_pattern.keys())))
+    for pat in all_patterns:
+        b_rate = batch_per_pattern.get(pat, {}).get("detection_rate", float("nan"))
+        s_rate = sess_per_pattern.get(pat, {}).get("detection_rate", float("nan"))
+        delta  = s_rate - b_rate if not (np.isnan(b_rate) or np.isnan(s_rate)) else float("nan")
+        delta_str = f"{delta:+.4f}" if not np.isnan(delta) else "   N/A"
+        log(f"  {pat:<22} {b_rate:>14.4f} {s_rate:>16.4f} {delta_str:>8}")
     log()
 
     # ── Summary table ──
@@ -291,37 +461,37 @@ def main():
     cv_f1s  = champ_cv.get("f1_std",       float("nan"))
     hard_auc_str = (f"{hard['roc_auc']:.4f}"
                    if not np.isnan(hard['roc_auc']) else "N/A(1-class)")
-    log(f"  {'Tier':<30} {'AUC-ROC':>14} {'F1':>10} {'DetRate':>9}")
-    log("  " + "-" * 65)
-    log(f"  {'CV (5-fold, honest)':<30} "
+    sess_det = sess.get("recall", float("nan")) if sess else float("nan")
+    sess_f1  = sess.get("f1",     float("nan")) if sess else float("nan")
+
+    log(f"  {'Tier':<35} {'AUC-ROC':>14} {'F1':>10} {'DetRate':>9}")
+    log("  " + "-" * 70)
+    log(f"  {'CV (5-fold, honest)':<35} "
         f"{cv_auc:.4f}±{cv_std:.4f}  {cv_f1:.4f}±{cv_f1s:.4f}        —")
-    log(f"  {'Easy test (upper bound)':<30} "
+    log(f"  {'Easy test (upper bound)':<35} "
         f"{'':>5}{easy['roc_auc']:.4f}{'':>9}  {easy['f1']:.4f}        —")
-    log(f"  {'Hard test (prod. lower bound)':<30} "
+    log(f"  {'Hard test batch (lower bound)':<35} "
         f"{'':>5}{hard_auc_str:<12}  {hard['f1']:.4f}   {hard['recall']:.4f}")
+    if sess:
+        log(f"  {'Hard test session (w/ temporal)':<35} "
+            f"{'':>5}{'N/A(1-class)':<12}  {sess_f1:.4f}   {sess_det:.4f}")
     log()
     log("  Interpretation:")
-    log("  ─ CV AUC is the headline metric — computed on clean folds without")
-    log("    label leakage. Put this number on your resume.")
-    log("  ─ Easy test AUC is the upper bound. Simulated data is separable;")
-    log("    real-world signals will be harder.")
-    log("  ─ Hard test AUC is the realistic production estimate. These bots")
-    log("    deliberately mimic human behaviour. A gap from Easy → Hard")
-    log("    shows the model's brittleness to adversarial evasion.")
-    # Use F1 gap since hard-test AUC is undefined (all bots, single class)
-    f1_gap = easy["f1"] - hard["f1"]
-    det_rate = hard["recall"]
-    log(f"\n  Easy → Hard F1 gap         : {f1_gap:+.4f}")
-    log(f"  Hard test detection rate   : {det_rate:.4f}  ({det_rate*100:.1f}% of adversarial bots caught)")
-    if det_rate < 0.50:
-        log("  ⚠  < 50% detection on adversarial set — significant blind spot.")
-        log("     Add hard-test patterns to training data.")
-    elif det_rate < 0.80:
-        log("  △  Moderate detection. Adversarial bots evade ~{:.0f}% of the time.".format(
-            (1 - det_rate) * 100))
-        log("     Consider adversarial training or session-level aggregation.")
+    log("  ─ CV AUC is the headline metric (no data leakage).")
+    log("  ─ Batch hard-test DetRate: each batch scored independently vs session label.")
+    log("    adaptive_bot reads low here because 50% of its batches look human.")
+    log("  ─ Session hard-test DetRate: the whole session is scored as a unit,")
+    log("    correctly measuring adaptive_bot detection via temporal drift blending.")
+    det_rate = sess_det if not np.isnan(sess_det) else hard["recall"]
+    f1_gap   = easy["f1"] - (sess_f1 if not np.isnan(sess_f1) else hard["f1"])
+    log(f"\n  Easy → Hard F1 gap (session)  : {f1_gap:+.4f}")
+    log(f"  Session detection rate        : {det_rate:.4f}  ({det_rate*100:.1f}% of adversarial bots caught)")
+    if det_rate < 0.75:
+        log("  △  Below 75% target. Improve temporal features or add more adversarial training data.")
+    elif det_rate < 0.90:
+        log("  ✓  Good detection. Some adaptive bots still evade — monitor in production.")
     else:
-        log("  ✓  Strong detection even on adversarial patterns.")
+        log("  ✓  Strong detection even on adaptive adversarial patterns.")
 
     log()
     log("=" * 70)
