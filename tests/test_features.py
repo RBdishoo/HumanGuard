@@ -7,15 +7,15 @@ from features.feature_extractor import FeatureExtractor
 from features.feature_utils import MouseTrajectoryUtils, KeystrokeUtils
 
 EXPECTED_KEYS = {
-    "batch_event_count", "has_mouse_moves", "has_clicks", "has_keys",
+    "batch_event_count",
     "mouseMoveCount", "mouseAvgVelocity", "mouseStdVelocity", "mouseMaxVelocity",
-    "mousePauseCount", "mouseAvgPauseDurationMs", "mousePathEfficiency",
+    "mouseAvgPauseDurationMs", "mousePathEfficiency",
     "mouseAngularVelocityStd", "mouseHoverTimeRatio", "mouseHoverFrequency",
-    "clickCount", "clickRatePerSec", "clickIntervalMeanMs", "clickIntervalStdMs",
-    "clickIntervalMinMs", "clickIntervalMaxMs", "clickClusteringRatio", "clickLeftRatio",
+    "clickRatePerSec", "clickIntervalMeanMs", "clickIntervalStdMs",
+    "clickIntervalMinMs", "clickIntervalMaxMs",
     "keyCount", "keyRatePerSec", "keyInterKeyDelayMeanMs", "keyInterKeyDelayStdMs",
     "keyEntropy", "keyRapidPresses",
-    "batchDurationMs", "eventRatePerSec", "signalDiversityEntropy",
+    "batchDurationMs", "eventRatePerSec",
     "clickToMoveRatio", "keyToMoveRatio",
 }
 

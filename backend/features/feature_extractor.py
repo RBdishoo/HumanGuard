@@ -45,9 +45,6 @@ class FeatureExtractor:
 
         #simple counts / presence flags
         features['batch_event_count'] = float(len(moves) + len(clicks) + len(keys))
-        features['has_mouse_moves'] = 1.0 if len(moves) > 0 else 0.0
-        features['has_clicks'] = 1.0 if len(clicks) > 0 else 0.0
-        features['has_keys'] = 1.0 if len(keys) > 0 else 0.0
 
         #Mouse features
         mouseFeatures = self.extractMouseFeatures(moves)
@@ -85,7 +82,6 @@ class FeatureExtractor:
             features['mouseAvgVelocity'] = 0.0
             features['mouseStdVelocity'] = 0.0
             features['mouseMaxVelocity'] = 0.0
-            features['mousePauseCount'] = 0.0
             features['mouseAvgPauseDurationMs'] = 0.0
             features['mousePathEfficiency'] = 0.0
             features['mouseAngularVelocityStd'] = 0.0
@@ -103,7 +99,6 @@ class FeatureExtractor:
             features['mouseAvgVelocity'] = 0.0
             features['mouseStdVelocity'] = 0.0
             features['mouseMaxVelocity'] = 0.0
-            features['mousePauseCount'] = 0.0
             features['mouseAvgPauseDurationMs'] = 0.0
             features['mousePathEfficiency'] = 0.0
             features['mouseAngularVelocityStd'] = 0.0
@@ -129,7 +124,6 @@ class FeatureExtractor:
         #Pause Detection using thresholds from __init__
 
         pauseCount, totalPauseMs = self.detectPauses(coords, timeDeltas)
-        features['mousePauseCount'] = float(pauseCount)
         features['mouseAvgPauseDurationMs'] = float(totalPauseMs / max(pauseCount, 1))
 
         #Path efficiency = total path / straight line
@@ -211,17 +205,12 @@ class FeatureExtractor:
        features: Dict[str, float] = {}
 
        if len(clicks) == 0:
-           features['clickCount'] = 0.0
            features['clickRatePerSec'] = 0.0
            features['clickIntervalMeanMs'] = 0.0
            features['clickIntervalStdMs'] = 0.0
            features['clickIntervalMinMs'] = 0.0
            features['clickIntervalMaxMs'] = 0.0
-           features['clickClusteringRatio'] = 0.0
-           features['clickLeftRatio'] = 0.0
            return features
-       
-       features['clickCount'] = float(len(clicks))
 
        #if more than one click, we can measure timing
        if len(clicks) > 1:
@@ -233,29 +222,19 @@ class FeatureExtractor:
             features['clickIntervalMinMs'] = float(np.min(intervals))
             features['clickIntervalMaxMs'] = float(np.max(intervals))
 
-            #Clustering: fraction of intervals < 500ms (rapid bursts)
-            rapid = np.sum(intervals < 500.0)
-            features['clickClusteringRatio'] = float(rapid / len(intervals))
-
             #Click rate per second over the whole batch
             totalDurationMs = timestamps[-1] - timestamps[0]
             if totalDurationMs > 0:
                 features['clickRatePerSec'] = float(len(clicks) / totalDurationMs * 1000)
             else:
                 features['clickRatePerSec'] = 0.0
-        
+
        else:
             features['clickRatePerSec'] = 0.0
             features['clickIntervalMeanMs'] = 0.0
             features['clickIntervalStdMs'] = 0.0
             features['clickIntervalMinMs'] = 0.0
             features['clickIntervalMaxMs'] = 0.0
-            features['clickClusteringRatio'] = 0.0
-    
-        #Button distribution (left vs others)
-       buttons = [c.get('button', 0) for c in clicks]
-       leftClicks = sum(1 for b in buttons if b == 0)
-       features['clickLeftRatio'] = float(leftClicks / len(clicks))
 
        return features
        
@@ -337,19 +316,6 @@ class FeatureExtractor:
        else:
            features['batchDurationMs'] = 0.0
            features['eventRatePerSec'] = 0.0 
-
-       #Signal Diversity: entropy of proportions of moves, clicks and keys
-       total = len(moves) + len(clicks) + len(keys)
-       if total > 0:
-           props = [
-               len(moves) / total,
-               len(clicks) / total,
-               len(keys) / total,
-           ]
-           diversity = self.utilsKey.calculateEntropy(props)
-           features['signalDiversityEntropy'] = float(diversity)
-       else:
-           features['signalDiversityEntropy'] = 0.0
 
        #Simple ratios relative to mouse moves
        if len(moves) > 0:

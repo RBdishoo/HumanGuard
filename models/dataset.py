@@ -43,23 +43,10 @@ class ModelDataset:
         x = df[featureCols].fillna(0)
         y = df['label'].map({'human': 0, 'bot': 1})     # 0 = human, 1 = bot
 
-        # Split
-        xTrain, xTest, yTrain, yTest =  train_test_split(
-            x, y, test_size=testSize, random_state=randomState
+        # Split — stratified so class ratios are preserved in both sets
+        xTrain, xTest, yTrain, yTest = train_test_split(
+            x, y, test_size=testSize, random_state=randomState, stratify=y
         )
-
-        # Label noise: flip ~10% of labels to simulate real-world annotation
-        # ambiguity (e.g. sophisticated bots labelled human, or bot-like humans
-        # labelled bot). Applied to both sets since label noise is inherent to
-        # the data collection process, not a train-time artefact.
-        noiseRate = 0.10
-        rng = np.random.RandomState(randomState)
-        trainFlip = rng.random(len(yTrain)) < noiseRate
-        yTrain = yTrain.copy()
-        yTrain.iloc[trainFlip] = 1 - yTrain.iloc[trainFlip]
-        testFlip = rng.random(len(yTest)) < noiseRate
-        yTest = yTest.copy()
-        yTest.iloc[testFlip] = 1 - yTest.iloc[testFlip]
 
         #Scale
         scaler = StandardScaler()
