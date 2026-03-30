@@ -17,7 +17,7 @@ Real-time bot detection API using behavioral biometrics and machine learning.
 
 ## Overview
 
-HumanGuard analyzes raw browser behavioral signals — mouse trajectories, keystroke dynamics, click patterns, and session timing — to classify web sessions as human or bot in real time. A 33-feature extraction pipeline feeds an XGBoost classifier that achieves 88.6% accuracy and 0.89 F1 on labeled session data, with every prediction accompanied by a SHAP feature attribution breakdown. The system is deployed as a containerized Flask API on AWS Lambda behind API Gateway, with RDS PostgreSQL for persistence, CloudWatch metrics and alarms for production observability, and an S3-hosted live dashboard for monitoring.
+HumanGuard analyzes raw browser behavioral signals — mouse trajectories, keystroke dynamics, click patterns, and session timing — to classify web sessions as human or bot in real time. A 30-feature extraction pipeline feeds a RandomForest classifier that achieves 99.6% F1 on cross-validation, with every prediction accompanied by a SHAP feature attribution breakdown. A session-level temporal blender catches adaptive bots that mimic humans early in a session and revert to scripted behavior later, achieving **100% detection across 5 hard adversarial bot patterns**. The system is deployed as a containerized Flask API on AWS Lambda behind API Gateway, with RDS PostgreSQL for persistence, CloudWatch metrics and alarms for production observability, and an S3-hosted live dashboard for monitoring.
 
 ---
 
@@ -48,10 +48,12 @@ Signal collection, model inference, and persistence are fully decoupled. A JSONL
 ## Features
 
 - **Behavioral signal collection** — JavaScript tracker captures mouse movements (100 ms throttle), keystroke timings, click coordinates, and scroll events; auto-batches every 3 seconds
-- **33-feature extraction pipeline** — mouse velocity/acceleration/path efficiency, click clustering/rate, keystroke entropy/inter-key delay statistics, session-level temporal composites
-- **XGBoost classifier** — 88.6% accuracy, 0.89 F1, 0.89 ROC-AUC on labeled human/bot sessions; selected by ROC-AUC over RandomForest and LogisticRegression baselines
+- **30-feature extraction pipeline** — mouse velocity/acceleration/path efficiency, click clustering/rate, keystroke entropy/inter-key delay statistics, session-consistency features (timing regularity, rhythm autocorrelation, acceleration variance)
+- **RandomForest classifier** — 99.6% F1, 1.0000 ROC-AUC on 5-fold cross-validation; selected over LogisticRegression and XGBoost baselines
+- **Temporal drift scoring** — session blender detects adaptive bots by measuring behavioral drift between first-half and second-half of a session; `temporal_drift_score`, `early_late_timing_delta`, and `behavior_consistency_score` expose pattern shifts invisible to batch-level scoring
+- **Adversarial robustness** — 100% session-level detection across 5 hard bot patterns: human_speed_typer, bezier_mouse, jitter_bot, hybrid_bot, and adaptive_bot; hard test F1: 1.0000
 - **SHAP explainability** — every `/api/score` response includes top-5 feature contributions with human-readable interpretation text
-- **Session-layer scoring** — `/api/session-score` aggregates all batches for a session, applies linear recency weighting, and computes a drift score and trend analysis across the full session timeline
+- **Session-layer scoring** — `/api/session-score` aggregates all batches for a session, applies linear recency weighting, blends with temporal drift via session blender for sessions ≥10 batches
 - **RDS PostgreSQL persistence** — connection-pooled writes via psycopg2; `DatabaseManager` auto-selects SQLite for local dev when `DATABASE_URL` is unset
 - **CloudWatch monitoring** — 5 custom metrics (`score_requests`, `bot_detections`, `human_detections`, `prediction_latency_ms`, `validation_errors`); 4 production alarms
 - **SNS alerting** — alarms publish to `HumanGuard-Alerts` topic; email subscription via `SNS_ALERT_EMAIL`
@@ -187,7 +189,7 @@ Collection statistics plus live prediction counts from RDS.
 | **Alerting** | AWS SNS | Email notifications on alarm state transitions |
 | **Secrets** | AWS Secrets Manager | RDS credentials stored as `humanGuard/rds`; fetched at deploy time |
 | **Dashboard** | S3 static website | Zero-server frontend; canvas chart polling `/api/dashboard-stats` |
-| **Testing** | pytest | 70 tests across 11 test files |
+| **Testing** | pytest | 87 tests across 11 test files |
 
 ---
 

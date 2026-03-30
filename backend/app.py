@@ -45,7 +45,7 @@ collector = SignalCollector()
 activeSessions = set()
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models" / "trained"
-MODEL_NAME = "XGBoost"
+MODEL_NAME = "RandomForest"
 IS_LAMBDA = os.environ.get("AWS_LAMBDA_FUNCTION_NAME") is not None
 PREDICTIONS_LOG = (
     Path("/tmp/predictions_log.jsonl") if IS_LAMBDA
