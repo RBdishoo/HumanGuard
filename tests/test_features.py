@@ -17,6 +17,10 @@ EXPECTED_KEYS = {
     "keyEntropy", "keyRapidPresses",
     "batchDurationMs", "eventRatePerSec",
     "clickToMoveRatio", "keyToMoveRatio",
+    # Session-consistency features
+    "keystroke_timing_regularity", "typing_rhythm_autocorrelation",
+    "mouse_acceleration_variance", "mouse_keystroke_correlation",
+    "session_phase_consistency",
 }
 
 

@@ -62,6 +62,10 @@ class FeatureExtractor:
         temporalFeatures = self.extractTemporalFeatures(moves, clicks, keys)
         features.update(temporalFeatures)
 
+        # Session-consistency features (catch human-mimicking bots)
+        consistencyFeatures = self.extractConsistencyFeatures(moves, keys)
+        features.update(consistencyFeatures)
+
         return features
     
 
@@ -328,6 +332,106 @@ class FeatureExtractor:
         
 
        return features
+
+    def extractConsistencyFeatures(self, moves: List[dict], keys: List[dict]) -> Dict[str, float]:
+        """
+        Extract session-consistency features that catch human-mimicking bots.
+
+        Features:
+          keystroke_timing_regularity     — CoV of inter-key delays; uniform bots score low
+          typing_rhythm_autocorrelation   — lag-1 autocorr of delays; Gaussian bots score ≈0
+          mouse_acceleration_variance     — variance of acceleration; linear bots score ≈0
+          mouse_keystroke_correlation     — mouse velocity ratio during keystrokes; bots ≈1.0
+          session_phase_consistency       — velocity std change between batch halves
+        """
+        features: Dict[str, float] = {}
+
+        # ── 1. keystroke_timing_regularity ────────────────────────────────
+        # Coefficient of variation (std/mean) of inter-key delays.
+        # Uniform bots score near 0 even at human-average speed.
+        if len(keys) >= 3:
+            delays = np.array(self.utilsKey.interKeyDelays(keys), dtype=float)
+            if len(delays) >= 2:
+                mean_d = float(np.mean(delays))
+                std_d  = float(np.std(delays))
+                features['keystroke_timing_regularity'] = float(std_d / max(mean_d, 1.0))
+            else:
+                features['keystroke_timing_regularity'] = 0.0
+        else:
+            features['keystroke_timing_regularity'] = 0.0
+
+        # ── 2. typing_rhythm_autocorrelation ──────────────────────────────
+        # Lag-1 autocorrelation of inter-key delays.
+        # Humans type in rhythmic bursts (positive autocorr);
+        # Gaussian bots draw independent samples (autocorr ≈ 0).
+        if len(keys) >= 4:
+            delays = np.array(self.utilsKey.interKeyDelays(keys), dtype=float)
+            if len(delays) >= 3 and np.std(delays) > 0:
+                corr = float(np.corrcoef(delays[:-1], delays[1:])[0, 1])
+                features['typing_rhythm_autocorrelation'] = corr if not np.isnan(corr) else 0.0
+            else:
+                features['typing_rhythm_autocorrelation'] = 0.0
+        else:
+            features['typing_rhythm_autocorrelation'] = 0.0
+
+        # ── 3. mouse_acceleration_variance ────────────────────────────────
+        # Variance of instantaneous acceleration along the mouse path.
+        # Linear constant-speed bots → ≈0. Humans have natural micro-corrections.
+        valid_moves = [m for m in moves if 'ts' in m]
+        if len(valid_moves) >= 4:
+            ts    = np.array([m['ts'] for m in valid_moves], dtype=float)
+            xs    = np.array([m['x']  for m in valid_moves], dtype=float)
+            ys    = np.array([m['y']  for m in valid_moves], dtype=float)
+            dt    = np.diff(ts)
+            dists = np.sqrt(np.diff(xs) ** 2 + np.diff(ys) ** 2)
+            vels  = dists / np.maximum(dt, 1.0) * 1000.0          # px/s
+            # acceleration: Δv / Δt using time of second segment
+            accels = np.diff(vels) / np.maximum(dt[1:], 1.0) * 1000.0  # px/s²
+            features['mouse_acceleration_variance'] = float(np.var(accels))
+        else:
+            features['mouse_acceleration_variance'] = 0.0
+
+        # ── 4. mouse_keystroke_correlation ────────────────────────────────
+        # Ratio: avg mouse velocity near keystroke events / overall avg velocity.
+        # Humans slow/stop mouse while typing (ratio < 1.0); bots maintain velocity (≈1.0).
+        if len(valid_moves) >= 2 and len(keys) >= 1:
+            ts    = np.array([m['ts'] for m in valid_moves], dtype=float)
+            xs    = np.array([m['x']  for m in valid_moves], dtype=float)
+            ys    = np.array([m['y']  for m in valid_moves], dtype=float)
+            dt    = np.diff(ts)
+            dists = np.sqrt(np.diff(xs) ** 2 + np.diff(ys) ** 2)
+            vels  = dists / np.maximum(dt, 1.0) * 1000.0
+            seg_ts = (ts[:-1] + ts[1:]) / 2.0                    # segment midpoints
+
+            overall_avg = float(np.mean(vels))
+            key_ts = np.array([k['ts'] for k in keys], dtype=float)
+            key_vels = [vels[int(np.argmin(np.abs(seg_ts - kts)))] for kts in key_ts]
+            avg_key_v = float(np.mean(key_vels))
+            features['mouse_keystroke_correlation'] = float(avg_key_v / max(overall_avg, 1.0))
+        else:
+            features['mouse_keystroke_correlation'] = 0.0
+
+        # ── 5. session_phase_consistency ──────────────────────────────────
+        # Difference in velocity std between first and second half of mouse moves.
+        # Bots that shift behaviour mid-batch (e.g., adaptive bots near phase boundary)
+        # show high values; consistently behaving bots show values near 0.
+        if len(valid_moves) >= 4:
+            ts    = np.array([m['ts'] for m in valid_moves], dtype=float)
+            xs    = np.array([m['x']  for m in valid_moves], dtype=float)
+            ys    = np.array([m['y']  for m in valid_moves], dtype=float)
+            dt    = np.diff(ts)
+            dists = np.sqrt(np.diff(xs) ** 2 + np.diff(ys) ** 2)
+            vels  = dists / np.maximum(dt, 1.0) * 1000.0
+            mid   = len(vels) // 2
+            std1  = float(np.std(vels[:mid]))  if mid > 0           else 0.0
+            std2  = float(np.std(vels[mid:]))  if len(vels) > mid   else 0.0
+            denom = std1 + std2
+            features['session_phase_consistency'] = float(abs(std1 - std2) / max(denom, 1.0))
+        else:
+            features['session_phase_consistency'] = 0.0
+
+        return features
+
 
 if __name__ == "__main__":
     # Quick manual test. From project root:
