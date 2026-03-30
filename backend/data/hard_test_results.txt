@@ -1,0 +1,77 @@
+======================================================================
+  HUMANGUARD — FULL EVALUATION REPORT
+  Generated: 2026-03-30
+======================================================================
+
+  Champion model : RandomForest
+  Feature count  : 25
+
+── 1. 5-FOLD STRATIFIED CROSS-VALIDATION ──────────────────────────
+  (Pipeline-internal scaling; no data leakage; most honest estimate)
+
+  Model                            Accuracy                 F1            AUC-ROC
+  ----------------------------------------------------------------------------
+  RandomForest           0.9969 ± 0.0016   0.9974 ± 0.0013   1.0000 ± 0.0000
+  LogisticRegression     0.9938 ± 0.0026   0.9947 ± 0.0022   0.9996 ± 0.0008
+  XGBoost                0.9984 ± 0.0023   0.9987 ± 0.0019   1.0000 ± 0.0000
+
+── 2. EASY TEST SET (80/20 stratified split, clean labels) ────────
+  (Upper bound — same distribution as training data)
+
+  Samples   : 513
+  Accuracy  : 0.9903
+  Precision : 0.9838
+  Recall    : 1.0000
+  F1        : 0.9918
+  AUC-ROC   : 1.0000
+  Confusion matrix:
+  TN=205  FP=5
+  FN=0  TP=303
+
+── 3. HARD TEST SET (adversarial bots, NOT in training) ───────────
+  (Realistic production lower-bound)
+
+  Samples   : 500
+  Accuracy  : 0.5640
+  Precision : 1.0000
+  Recall    : 0.5640  ← fraction of adversarial bots caught
+  F1        : 0.7212
+  AUC-ROC   : nan
+  Confusion matrix:
+  TN=0  FP=0
+  FN=218  TP=282
+
+  Per-pattern breakdown (detection_rate = recall for bots):
+  Pattern                     N   DetRate       F1
+  -----------------------------------------------
+  human_speed_typer         100    0.0000   0.0000
+  bezier_mouse              100    1.0000   1.0000
+  jitter_bot                100    1.0000   1.0000
+  hybrid_bot                100    0.3200   0.4848
+  adaptive_bot              100    0.5000   0.6667
+
+── 4. SUMMARY TABLE ────────────────────────────────────────────────
+
+  Tier                                  AUC-ROC         F1   DetRate
+  -----------------------------------------------------------------
+  CV (5-fold, honest)            1.0000±0.0000  0.9974±0.0013        —
+  Easy test (upper bound)             1.0000           0.9918        —
+  Hard test (prod. lower bound)       N/A(1-class)  0.7212   0.5640
+
+  Interpretation:
+  ─ CV AUC is the headline metric — computed on clean folds without
+    label leakage. Put this number on your resume.
+  ─ Easy test AUC is the upper bound. Simulated data is separable;
+    real-world signals will be harder.
+  ─ Hard test AUC is the realistic production estimate. These bots
+    deliberately mimic human behaviour. A gap from Easy → Hard
+    shows the model's brittleness to adversarial evasion.
+
+  Easy → Hard F1 gap         : +0.2706
+  Hard test detection rate   : 0.5640  (56.4% of adversarial bots caught)
+  △  Moderate detection. Adversarial bots evade ~44% of the time.
+     Consider adversarial training or session-level aggregation.
+
+======================================================================
+  END OF REPORT
+======================================================================

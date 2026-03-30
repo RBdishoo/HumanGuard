@@ -1,30 +1,56 @@
 {
   "winner": "RandomForest",
-  "selection_metric": "roc_auc",
+  "selection_metric": "cv_roc_auc",
   "models": [
     {
       "model": "RandomForest",
-      "accuracy": 1.0,
-      "precision": 1.0,
+      "accuracy": 0.9902534113060428,
+      "precision": 0.9837662337662337,
       "recall": 1.0,
-      "f1": 1.0,
+      "f1": 0.9918166939443536,
       "roc_auc": 1.0
     },
     {
       "model": "LogisticRegression",
+      "accuracy": 0.9902534113060428,
+      "precision": 0.9869281045751634,
+      "recall": 0.9966996699669967,
+      "f1": 0.9917898193760263,
+      "roc_auc": 0.9998742731415998
+    },
+    {
+      "model": "XGBoost",
       "accuracy": 1.0,
       "precision": 1.0,
       "recall": 1.0,
       "f1": 1.0,
       "roc_auc": 1.0
-    },
-    {
-      "model": "XGBoost",
-      "accuracy": 0.998,
-      "precision": 1.0,
-      "recall": 0.9966666666666667,
-      "f1": 0.998330550918197,
-      "roc_auc": 1.0
     }
-  ]
+  ],
+  "cross_validation": {
+    "RandomForest": {
+      "accuracy_mean": 0.9968810916179336,
+      "accuracy_std": 0.0015594541910331327,
+      "f1_mean": 0.9973684157134869,
+      "f1_std": 0.0013117348090230338,
+      "roc_auc_mean": 1.0,
+      "roc_auc_std": 0.0
+    },
+    "LogisticRegression": {
+      "accuracy_mean": 0.9937621832358673,
+      "accuracy_std": 0.0025860622147020596,
+      "f1_mean": 0.9947476166738347,
+      "f1_std": 0.0021706478625628505,
+      "roc_auc_mean": 0.9995945308816596,
+      "roc_auc_std": 0.0007718646162210705
+    },
+    "XGBoost": {
+      "accuracy_mean": 0.9984405458089668,
+      "accuracy_std": 0.0022732755925323036,
+      "f1_mean": 0.9986787751712118,
+      "f1_std": 0.0019274018254663778,
+      "roc_auc_mean": 0.99999371365708,
+      "roc_auc_std": 1.2572685840028798e-05
+    }
+  }
 }
