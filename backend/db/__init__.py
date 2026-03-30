@@ -51,6 +51,15 @@ CREATE TABLE IF NOT EXISTS predictions (
     source          TEXT,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS leaderboard (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    nickname    TEXT NOT NULL,
+    prob_bot    REAL NOT NULL,
+    verdict     TEXT NOT NULL,
+    session_id  TEXT NOT NULL,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -281,6 +290,112 @@ class DatabaseManager:
             "bot_count": bots,
             "human_count": humans,
             "bot_rate": round(bots / total, 4) if total > 0 else 0.0,
+        }
+
+
+    def save_leaderboard_entry(self, nickname: str, prob_bot: float,
+                               verdict: str, session_id: str) -> int:
+        """Insert a leaderboard entry and return the new row id."""
+        if self._use_postgres:
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "INSERT INTO leaderboard (nickname, prob_bot, verdict, session_id) "
+                        "VALUES (%s, %s, %s, %s) RETURNING id",
+                        (nickname, prob_bot, verdict, session_id),
+                    )
+                    row_id = cur.fetchone()[0]
+                    conn.commit()
+                    return row_id
+                finally:
+                    self._pg.release_connection(conn)
+            except Exception as exc:
+                logger.warning("DB save_leaderboard_entry failed: %s", exc)
+                return -1
+
+        try:
+            with self._sqlite_cursor() as cur:
+                cur.execute(
+                    "INSERT INTO leaderboard (nickname, prob_bot, verdict, session_id) "
+                    "VALUES (?, ?, ?, ?)",
+                    (nickname, prob_bot, verdict, session_id),
+                )
+                return cur.lastrowid
+        except Exception as exc:
+            logger.warning("SQLite save_leaderboard_entry failed: %s", exc)
+            return -1
+
+    def get_leaderboard(self, limit: int = 20) -> list:
+        """Return top *limit* entries ordered by prob_bot ASC (most-human first)."""
+        if self._use_postgres:
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT nickname, prob_bot, verdict, session_id, created_at "
+                        "FROM leaderboard ORDER BY prob_bot ASC LIMIT %s",
+                        (limit,),
+                    )
+                    cols = [d[0] for d in cur.description]
+                    return [dict(zip(cols, row)) for row in cur.fetchall()]
+                finally:
+                    self._pg.release_connection(conn)
+            except Exception as exc:
+                logger.warning("DB get_leaderboard failed: %s", exc)
+                return []
+
+        try:
+            with self._sqlite_cursor() as cur:
+                cur.execute(
+                    "SELECT nickname, prob_bot, verdict, session_id, created_at "
+                    "FROM leaderboard ORDER BY prob_bot ASC LIMIT ?",
+                    (limit,),
+                )
+                return [dict(row) for row in cur.fetchall()]
+        except Exception as exc:
+            logger.warning("SQLite get_leaderboard failed: %s", exc)
+            return []
+
+    def get_leaderboard_stats(self) -> dict:
+        """Return total participants, avg prob_bot, and % identified as human."""
+        empty = {"total": 0, "avg_prob_bot": 0.0, "pct_human": 0.0}
+        _sql = (
+            "SELECT COUNT(*), AVG(prob_bot), "
+            "SUM(CASE WHEN verdict='human' THEN 1 ELSE 0 END) "
+            "FROM leaderboard"
+        )
+
+        if self._use_postgres:
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(_sql)
+                    row = cur.fetchone()
+                finally:
+                    self._pg.release_connection(conn)
+            except Exception as exc:
+                logger.warning("DB get_leaderboard_stats failed: %s", exc)
+                return empty
+        else:
+            try:
+                with self._sqlite_cursor() as cur:
+                    cur.execute(_sql)
+                    row = cur.fetchone()
+            except Exception as exc:
+                logger.warning("SQLite get_leaderboard_stats failed: %s", exc)
+                return empty
+
+        total = int(row[0] or 0)
+        avg = float(row[1] or 0.0)
+        human_count = int(row[2] or 0)
+        return {
+            "total": total,
+            "avg_prob_bot": round(avg, 4),
+            "pct_human": round(human_count / total * 100, 1) if total else 0.0,
         }
 
 

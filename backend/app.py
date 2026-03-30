@@ -857,6 +857,140 @@ def serveSimulator():
     return send_from_directory('../frontend', 'bot_simulator.html')
 
 
+@app.route('/leaderboard', methods=['GET'])
+def serveLeaderboard():
+    """GET /leaderboard — Serves the public leaderboard page."""
+    return send_from_directory('../frontend', 'leaderboard.html')
+
+
+@app.route('/api/leaderboard', methods=['POST'])
+def leaderboardPost():
+    """
+    POST /api/leaderboard
+    Submit a nickname + session_id to add to the leaderboard.
+    Looks up the prediction from the predictions log and stores the entry.
+    Returns rank, total, and a percentile message.
+    """
+    import re as _re
+    data = request.get_json(silent=True) or {}
+
+    raw_nickname = str(data.get("nickname", "")).strip()
+    session_id = str(data.get("session_id", "")).strip()
+
+    if not raw_nickname:
+        return jsonify({"error": "nickname is required"}), 400
+
+    # Sanitize: alphanumeric + spaces, max 20 chars
+    nickname = _re.sub(r"[^a-zA-Z0-9 ]", "", raw_nickname)[:20].strip()
+    if not nickname:
+        return jsonify({"error": "nickname must contain alphanumeric characters"}), 400
+
+    if not session_id:
+        return jsonify({"error": "session_id is required"}), 400
+
+    # Look up prediction from JSONL log
+    prob_bot = None
+    verdict = None
+    if PREDICTIONS_LOG.exists():
+        with open(PREDICTIONS_LOG, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    if rec.get("sessionID") == session_id:
+                        prob_bot = rec.get("prob_bot")
+                        verdict = rec.get("label")
+                except Exception:
+                    continue
+
+    # Fall back to DB if not found in JSONL
+    if prob_bot is None:
+        rows = db_manager.get_recent_predictions(limit=1000)
+        for row in rows:
+            if row.get("session_id") == session_id:
+                prob_bot = row.get("prob_bot")
+                verdict = row.get("label")
+                break
+
+    if prob_bot is None:
+        return jsonify({"error": "session not found — complete the challenge first"}), 404
+
+    # Save to leaderboard
+    db_manager.save_leaderboard_entry(nickname, prob_bot, verdict, session_id)
+
+    # Compute rank from all entries (sorted by prob_bot ASC)
+    all_entries = db_manager.get_leaderboard(limit=100000)
+    rank = len(all_entries)  # default to last
+    for i, entry in enumerate(all_entries):
+        if entry.get("session_id") == session_id:
+            rank = i + 1
+            break
+
+    total = len(all_entries)
+    percentile = round((1 - (rank - 1) / max(total - 1, 1)) * 100) if total > 1 else 100
+
+    return jsonify({
+        "rank": rank,
+        "total": total,
+        "nickname": nickname,
+        "prob_bot": prob_bot,
+        "verdict": verdict,
+        "percentile": percentile,
+        "message": f"You scored more human than {percentile}% of participants",
+    }), 200
+
+
+@app.route('/api/leaderboard', methods=['GET'])
+def leaderboardGet():
+    """
+    GET /api/leaderboard
+    Returns top 20 leaderboard entries (lowest prob_bot first) with rank,
+    human_confidence percentage, verdict, and time_ago.
+    """
+    try:
+        limit = min(int(request.args.get("limit", 20)), 50)
+        entries = db_manager.get_leaderboard(limit=limit)
+        stats = db_manager.get_leaderboard_stats()
+
+        now = datetime.utcnow()
+        result = []
+        for i, e in enumerate(entries):
+            created_at = e.get("created_at", "")
+            try:
+                if isinstance(created_at, str) and created_at:
+                    ts = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                    diff = now - ts.replace(tzinfo=None)
+                    mins = int(diff.total_seconds() / 60)
+                    if mins < 1:
+                        time_ago = "just now"
+                    elif mins < 60:
+                        time_ago = f"{mins}m ago"
+                    else:
+                        time_ago = f"{mins // 60}h ago"
+                else:
+                    time_ago = ""
+            except Exception:
+                time_ago = str(created_at) if created_at else ""
+
+            result.append({
+                "rank": i + 1,
+                "nickname": e.get("nickname"),
+                "prob_bot": round(float(e.get("prob_bot", 0)), 4),
+                "human_confidence": round((1 - float(e.get("prob_bot", 0))) * 100),
+                "verdict": e.get("verdict"),
+                "session_id": e.get("session_id"),
+                "time_ago": time_ago,
+            })
+
+        return jsonify({"entries": result, "stats": stats}), 200
+
+    except Exception as exc:
+        logger.exception("Error in GET /api/leaderboard")
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route('/api/export', methods=['GET'])
 def exportSessions():
     """

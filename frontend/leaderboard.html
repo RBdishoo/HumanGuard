@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HumanGuard — Leaderboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 14px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px 60px;
+    }
+
+    /* ── Header ── */
+    .header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .header h1 {
+      font-size: 26px;
+      color: #58a6ff;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .header p {
+      color: #8b949e;
+      font-size: 12px;
+      letter-spacing: 1px;
+    }
+
+    /* ── Stats bar ── */
+    .stats-bar {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      width: 100%;
+      max-width: 680px;
+      margin-bottom: 20px;
+    }
+    .stat-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 18px 20px;
+      text-align: center;
+    }
+    .stat-card .stat-value {
+      font-size: 30px;
+      font-weight: bold;
+      color: #c9d1d9;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .stat-card .stat-value.blue  { color: #58a6ff; }
+    .stat-card .stat-value.green { color: #3fb950; }
+    .stat-card .stat-label {
+      font-size: 10px;
+      color: #484f58;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 28px 32px;
+      width: 100%;
+      max-width: 680px;
+      margin-bottom: 14px;
+    }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 18px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #21262d;
+    }
+    .card-title {
+      font-size: 10px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .refresh-info { font-size: 10px; color: #484f58; }
+    .refresh-info span { color: #58a6ff; }
+
+    /* ── Leaderboard table ── */
+    .lb-table { width: 100%; border-collapse: collapse; }
+    .lb-table th {
+      font-size: 9px;
+      color: #484f58;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      text-align: left;
+      padding: 0 0 10px 0;
+    }
+    .lb-table th.right, .lb-table td.right { text-align: right; }
+    .lb-table td {
+      font-size: 12px;
+      color: #c9d1d9;
+      padding: 8px 0;
+      border-top: 1px solid #21262d;
+    }
+    .lb-rank { color: #484f58; width: 36px; font-size: 11px; }
+    .lb-rank-1 { color: #f0c040; font-weight: bold; font-size: 14px; }
+    .lb-rank-2 { color: #a8a8b0; font-weight: bold; }
+    .lb-rank-3 { color: #cd7f32; font-weight: bold; }
+    .lb-nickname { font-weight: bold; }
+    .lb-conf { font-weight: bold; }
+    .lb-conf.green  { color: #3fb950; }
+    .lb-conf.yellow { color: #d29922; }
+    .lb-conf.red    { color: #f85149; }
+    .lb-verdict {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      display: inline-block;
+      letter-spacing: 0.5px;
+    }
+    .lb-verdict.human { background: #1c3d2a; color: #3fb950; }
+    .lb-verdict.bot   { background: #3d1c1c; color: #f85149; }
+    .lb-time { color: #484f58; font-size: 11px; }
+    .lb-empty {
+      text-align: center;
+      color: #484f58;
+      font-size: 12px;
+      padding: 32px 0;
+    }
+
+    /* ── CTA ── */
+    .cta-card {
+      background: #0d1117;
+      border: 1px solid #1f6feb;
+      border-radius: 8px;
+      padding: 20px 28px;
+      width: 100%;
+      max-width: 680px;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .cta-text { font-size: 13px; color: #8b949e; }
+    .cta-text strong { color: #c9d1d9; }
+    .btn-cta {
+      padding: 11px 22px;
+      background: #1f6feb;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      cursor: pointer;
+      text-decoration: none;
+      white-space: nowrap;
+      transition: background 0.2s;
+    }
+    .btn-cta:hover { background: #388bfd; }
+
+    /* ── Footer ── */
+    .footer {
+      margin-top: 16px;
+      font-size: 10px;
+      color: #484f58;
+      text-align: center;
+      letter-spacing: 1px;
+    }
+    .footer a { color: #484f58; text-decoration: none; }
+    .footer a:hover { color: #8b949e; }
+
+    @media (max-width: 600px) {
+      body { padding: 24px 14px 40px; }
+      .header h1 { font-size: 20px; }
+      .stats-bar { grid-template-columns: 1fr 1fr; }
+      .stats-bar .stat-card:last-child { grid-column: span 2; }
+      .card { padding: 20px; }
+      .cta-card { flex-direction: column; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <h1>HumanGuard</h1>
+    <p>Leaderboard — Most Human Scores</p>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-bar">
+    <div class="stat-card">
+      <div class="stat-value blue" id="statTotal">—</div>
+      <div class="stat-label">Total Tested</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value green" id="statHuman">—</div>
+      <div class="stat-label">Fooled the Detector</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="statAvg">—</div>
+      <div class="stat-label">Avg Human Confidence</div>
+    </div>
+  </div>
+
+  <!-- Leaderboard table -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Top 50 — Lowest Bot Probability</div>
+      <div class="refresh-info">Auto-refreshes in <span id="countdown">60</span>s</div>
+    </div>
+    <table class="lb-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Name</th>
+          <th class="right">Human Confidence</th>
+          <th class="right">Verdict</th>
+          <th class="right">Time</th>
+        </tr>
+      </thead>
+      <tbody id="lbBody">
+        <tr><td colspan="5" class="lb-empty">Loading leaderboard…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- CTA -->
+  <div class="cta-card">
+    <div class="cta-text"><strong>Can you top the leaderboard?</strong><br>Take the challenge and prove you're human.</div>
+    <a href="/demo" class="btn-cta">Take the Challenge →</a>
+  </div>
+
+  <div class="footer">
+    <a href="/demo">← Demo</a> &nbsp;·&nbsp;
+    <a href="/dashboard">Dashboard</a> &nbsp;·&nbsp;
+    HumanGuard Behavioral Bot Detection
+  </div>
+
+  <script>
+    const API_BASE = window.location.hostname === 'localhost'
+      ? 'http://localhost:5050'
+      : window.location.origin;
+
+    let countdown = 60;
+    let refreshTimer = null;
+    let countdownTimer = null;
+
+    async function fetchLeaderboard() {
+      try {
+        const resp = await fetch(`${API_BASE}/api/leaderboard?limit=50`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderLeaderboard(data);
+      } catch (_) {
+        document.getElementById('lbBody').innerHTML =
+          '<tr><td colspan="5" class="lb-empty">Unable to load leaderboard.</td></tr>';
+      }
+    }
+
+    function renderLeaderboard(data) {
+      const entries = data.entries || [];
+      const stats   = data.stats   || {};
+
+      // Stats bar
+      const total = typeof stats.total === 'number' ? stats.total : 0;
+      document.getElementById('statTotal').textContent = total.toLocaleString();
+
+      const pctHuman = typeof stats.pct_human === 'number' ? stats.pct_human : 0;
+      document.getElementById('statHuman').textContent = pctHuman.toFixed(1) + '%';
+
+      const avgConf = typeof stats.avg_prob_bot === 'number'
+        ? Math.round((1 - stats.avg_prob_bot) * 100) : 0;
+      document.getElementById('statAvg').textContent = avgConf + '%';
+
+      // Table
+      const tbody = document.getElementById('lbBody');
+      if (entries.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="lb-empty">No entries yet — be the first!</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = entries.map(e => {
+        const rankStr   = e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : e.rank;
+        const rankClass = e.rank === 1 ? 'lb-rank-1' : e.rank === 2 ? 'lb-rank-2' : e.rank === 3 ? 'lb-rank-3' : 'lb-rank';
+        const conf      = e.human_confidence;
+        const confClass = conf >= 65 ? 'green' : conf >= 35 ? 'yellow' : 'red';
+        const verdict   = e.verdict || 'human';
+        return `<tr>
+          <td class="${rankClass}">${rankStr}</td>
+          <td class="lb-nickname">${escapeHtml(e.nickname)}</td>
+          <td class="lb-conf ${confClass} right">${conf}%</td>
+          <td class="right"><span class="lb-verdict ${verdict}">${verdict}</span></td>
+          <td class="lb-time right">${e.time_ago}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function startCountdown() {
+      countdown = 60;
+      clearInterval(countdownTimer);
+      countdownTimer = setInterval(() => {
+        countdown -= 1;
+        const el = document.getElementById('countdown');
+        if (el) el.textContent = countdown;
+        if (countdown <= 0) {
+          clearInterval(countdownTimer);
+          fetchLeaderboard().then(() => startCountdown());
+        }
+      }, 1000);
+    }
+
+    window.addEventListener('load', () => {
+      fetchLeaderboard();
+      startCountdown();
+    });
+  </script>
+
+</body>
+</html>

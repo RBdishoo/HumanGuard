@@ -368,6 +368,132 @@
       letter-spacing: 1px;
     }
 
+    /* ── Leaderboard submit ── */
+    .lb-submit {
+      display: none;
+      margin-top: 20px;
+      padding-top: 18px;
+      border-top: 1px solid #21262d;
+    }
+    .lb-submit.visible { display: block; }
+    .lb-submit-title {
+      font-size: 10px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+    .lb-input-row {
+      display: flex;
+      gap: 8px;
+    }
+    .lb-input-row input {
+      flex: 1;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #c9d1d9;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 13px;
+      padding: 10px 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .lb-input-row input:focus { border-color: #58a6ff; }
+    .lb-input-row input::placeholder { color: #484f58; }
+    .btn-lb {
+      padding: 10px 18px;
+      background: #1f6feb;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.2s;
+    }
+    .btn-lb:hover { background: #388bfd; }
+    .btn-lb:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+    .rank-reveal {
+      display: none;
+      margin-top: 14px;
+      background: #0d1117;
+      border: 1px solid #1f6feb;
+      border-radius: 6px;
+      padding: 14px 18px;
+      text-align: center;
+    }
+    .rank-reveal.visible { display: block; }
+    .rank-reveal .rank-number {
+      font-size: 32px;
+      font-weight: bold;
+      color: #58a6ff;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .rank-reveal .rank-msg { font-size: 12px; color: #8b949e; }
+    .rank-reveal .percentile-msg { font-size: 13px; color: #3fb950; margin-top: 6px; font-weight: bold; }
+
+    /* ── Live leaderboard table ── */
+    .lb-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 24px 28px;
+      width: 100%;
+      max-width: 600px;
+      margin-bottom: 14px;
+    }
+    .lb-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #21262d;
+    }
+    .lb-card-title {
+      font-size: 10px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .lb-participant-count { font-size: 11px; color: #484f58; }
+    .lb-participant-count span { color: #58a6ff; }
+    .lb-table { width: 100%; border-collapse: collapse; }
+    .lb-table th {
+      font-size: 9px;
+      color: #484f58;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      text-align: left;
+      padding: 0 0 8px 0;
+    }
+    .lb-table th:nth-child(3), .lb-table td:nth-child(3) { text-align: right; }
+    .lb-table td {
+      font-size: 12px;
+      color: #c9d1d9;
+      padding: 7px 0;
+      border-top: 1px solid #21262d;
+    }
+    .lb-table tr.current-user td { color: #58a6ff; background: rgba(31,111,235,0.07); }
+    .lb-table tr.current-user td:first-child { border-radius: 4px 0 0 4px; }
+    .lb-table tr.current-user td:last-child { border-radius: 0 4px 4px 0; }
+    .lb-rank { color: #484f58; width: 32px; }
+    .lb-rank-top { color: #d29922; font-weight: bold; }
+    .lb-conf { font-weight: bold; }
+    .lb-conf.green { color: #3fb950; }
+    .lb-conf.yellow { color: #d29922; }
+    .lb-conf.red { color: #f85149; }
+    .lb-time { color: #484f58; font-size: 11px; text-align: right; }
+    .lb-empty { text-align: center; color: #484f58; font-size: 12px; padding: 20px 0; }
+    .lb-link { font-size: 10px; color: #484f58; text-align: center; margin-top: 4px; }
+    .lb-link a { color: #58a6ff; text-decoration: none; }
+    .lb-link a:hover { text-decoration: underline; }
+
     @media (max-width: 640px) {
       body { padding: 24px 14px 40px; }
       .header h1 { font-size: 20px; }
@@ -453,9 +579,47 @@
 
         <button class="btn-secondary" onclick="resetChallenge()">Try Again</button>
 
+        <!-- Leaderboard submit -->
+        <div class="lb-submit" id="lbSubmit">
+          <div class="lb-submit-title">Join the Leaderboard</div>
+          <div class="lb-input-row">
+            <input type="text" id="nicknameInput" placeholder="Enter a name…" maxlength="20" autocomplete="off">
+            <button class="btn-lb" id="lbSubmitBtn" onclick="submitLeaderboard()">Submit</button>
+          </div>
+          <div class="rank-reveal" id="rankReveal">
+            <div class="rank-number" id="rankNumber">—</div>
+            <div class="rank-msg" id="rankMsg">—</div>
+            <div class="percentile-msg" id="percentileMsg"></div>
+          </div>
+        </div>
+
       </div>
     </div>
 
+  </div>
+
+  <!-- Live leaderboard -->
+  <div class="lb-card">
+    <div class="lb-card-header">
+      <div class="lb-card-title">Live Leaderboard</div>
+      <div class="lb-participant-count"><span id="lbTotal">—</span> participants</div>
+    </div>
+    <table class="lb-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Name</th>
+          <th>Human Confidence</th>
+          <th style="text-align:right">Time</th>
+        </tr>
+      </thead>
+      <tbody id="lbBody">
+        <tr><td colspan="4" class="lb-empty">Loading leaderboard…</td></tr>
+      </tbody>
+    </table>
+    <div class="lb-link" style="margin-top:12px">
+      <a href="/leaderboard">View full leaderboard →</a>
+    </div>
   </div>
 
   <div class="footer">
@@ -642,6 +806,8 @@
       }
 
       fetchCounter();
+      document.getElementById('lbSubmit').classList.add('visible');
+      fetchLeaderboard();
     }
 
     function probColor(p) {
@@ -663,8 +829,92 @@
       } catch (_) {}
     }
 
+    // ── Leaderboard submit ─────────────────────────────────────────────
+    async function submitLeaderboard() {
+      const nickname = document.getElementById('nicknameInput').value.trim();
+      if (!nickname) {
+        document.getElementById('nicknameInput').focus();
+        return;
+      }
+      const btn = document.getElementById('lbSubmitBtn');
+      btn.disabled = true;
+      btn.textContent = '…';
+
+      try {
+        const resp = await fetch(`${API_BASE}/api/leaderboard`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nickname, session_id: SESSION_ID }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          btn.disabled = false;
+          btn.textContent = 'Submit';
+          return;
+        }
+        document.getElementById('rankNumber').textContent = `#${data.rank}`;
+        document.getElementById('rankMsg').textContent =
+          `out of ${data.total} participant${data.total !== 1 ? 's' : ''}`;
+        document.getElementById('percentileMsg').textContent = data.message || '';
+        document.getElementById('rankReveal').classList.add('visible');
+        btn.textContent = '✓ Submitted';
+        fetchLeaderboard();
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Submit';
+      }
+    }
+
+    // ── Leaderboard fetch ──────────────────────────────────────────────
+    let _currentSessionSubmitted = false;
+
+    async function fetchLeaderboard() {
+      try {
+        const resp = await fetch(`${API_BASE}/api/leaderboard?limit=20`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const entries = data.entries || [];
+        const stats = data.stats || {};
+
+        document.getElementById('lbTotal').textContent =
+          typeof stats.total === 'number' ? stats.total.toLocaleString() : '—';
+
+        const tbody = document.getElementById('lbBody');
+        if (entries.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="4" class="lb-empty">No entries yet — be the first!</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = entries.map(e => {
+          const isCurrent = e.session_id === SESSION_ID;
+          const rankClass = e.rank <= 3 ? 'lb-rank-top' : 'lb-rank';
+          const conf = e.human_confidence;
+          const confClass = conf >= 65 ? 'green' : conf >= 35 ? 'yellow' : 'red';
+          return `<tr class="${isCurrent ? 'current-user' : ''}">
+            <td class="${rankClass}">${e.rank}</td>
+            <td>${escapeHtml(e.nickname)}</td>
+            <td class="lb-conf ${confClass}" style="text-align:right">${conf}%</td>
+            <td class="lb-time">${e.time_ago}</td>
+          </tr>`;
+        }).join('');
+      } catch (_) {}
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
     // ── Boot ───────────────────────────────────────────────────────────
-    window.addEventListener('load', () => { placeTarget(); fetchCounter(); });
+    window.addEventListener('load', () => {
+      placeTarget();
+      fetchCounter();
+      fetchLeaderboard();
+      setInterval(fetchLeaderboard, 30000);
+    });
   </script>
 
 </body>

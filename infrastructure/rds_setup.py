@@ -191,6 +191,38 @@ def add_source_label_columns(database_url: str):
         conn.close()
 
 
+def add_leaderboard_table(database_url: str):
+    """
+    Create leaderboard table in PostgreSQL if it does not exist.
+    Safe to run multiple times.
+    """
+    import psycopg2
+
+    create_sql = """
+    CREATE TABLE IF NOT EXISTS leaderboard (
+        id          SERIAL PRIMARY KEY,
+        nickname    VARCHAR(20) NOT NULL,
+        prob_bot    REAL NOT NULL,
+        verdict     VARCHAR(10) NOT NULL,
+        session_id  TEXT NOT NULL,
+        created_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    """
+
+    conn = psycopg2.connect(database_url)
+    try:
+        cur = conn.cursor()
+        cur.execute(create_sql)
+        conn.commit()
+        print("  OK: leaderboard table created (or already exists)")
+    except Exception as exc:
+        conn.rollback()
+        print(f"Leaderboard migration failed: {exc}")
+        raise
+    finally:
+        conn.close()
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -208,6 +240,7 @@ if __name__ == "__main__":
             sys.exit(1)
         print("=== HumanGuard Column Migration ===\n")
         add_source_label_columns(db_url)
+        add_leaderboard_table(db_url)
         sys.exit(0)
 
     print(f"=== HumanGuard RDS Setup (region={REGION}) ===\n")
