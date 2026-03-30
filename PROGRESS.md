@@ -13,6 +13,7 @@
 | Database | ✅ Complete | RDS PostgreSQL in production; SQLite auto-fallback for local dev |
 | Monitoring | ✅ Complete | 5 CloudWatch metrics, 4 alarms, SNS email alerts active |
 | Dashboard | ✅ Complete | S3-hosted, polls `/api/dashboard-stats`, live chart + SHAP bars |
+| CloudFront | ✅ Complete | HTTPS distribution `E3F5RTWRNWWQB0`; HTTP→HTTPS redirect; tuned cache TTLs |
 | Tests | ✅ Complete | 70 tests across 9 files, all passing |
 
 ---
@@ -175,9 +176,11 @@ The drift score (`max_prob_bot − mean_prob_bot`) detects sessions where bot pr
 | Resource | Value |
 |---|---|
 | **API (Lambda + API Gateway)** | `https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com` |
-| **Demo** | `http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com/demo.html` |
-| **Leaderboard** | `http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com/leaderboard.html` |
-| **Dashboard** | `http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com/dashboard.html` |
+| **CloudFront distribution** | `https://d1hi33wespusty.cloudfront.net` (ID: `E3F5RTWRNWWQB0`) |
+| **Demo** | `https://d1hi33wespusty.cloudfront.net/demo.html` |
+| **Leaderboard** | `https://d1hi33wespusty.cloudfront.net/leaderboard.html` |
+| **Dashboard** | `https://d1hi33wespusty.cloudfront.net/dashboard.html` |
+| **S3 origin (HTTP)** | `http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com` |
 | **RDS endpoint** | `humanguard-db.c8p60woyyitr.us-east-1.rds.amazonaws.com:5432` |
 | **SNS topic ARN** | `arn:aws:sns:us-east-1:796793347388:HumanGuard-Alerts` |
 | **Secrets Manager** | `humanGuard/rds` (us-east-1) |
