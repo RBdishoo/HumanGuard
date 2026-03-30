@@ -4,6 +4,17 @@ Real-time bot detection API using behavioral biometrics and machine learning.
 
 ---
 
+## Live Demo
+
+| Page | URL |
+|---|---|
+| **Demo** (take the challenge) | http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com/demo.html |
+| **Leaderboard** | http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com/leaderboard.html |
+| **Dashboard** (monitoring) | http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com/dashboard.html |
+| **Lambda API** | https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com |
+
+---
+
 ## Overview
 
 HumanGuard analyzes raw browser behavioral signals — mouse trajectories, keystroke dynamics, click patterns, and session timing — to classify web sessions as human or bot in real time. A 33-feature extraction pipeline feeds an XGBoost classifier that achieves 88.6% accuracy and 0.89 F1 on labeled session data, with every prediction accompanied by a SHAP feature attribution breakdown. The system is deployed as a containerized Flask API on AWS Lambda behind API Gateway, with RDS PostgreSQL for persistence, CloudWatch metrics and alarms for production observability, and an S3-hosted live dashboard for monitoring.
@@ -45,7 +56,7 @@ Signal collection, model inference, and persistence are fully decoupled. A JSONL
 - **CloudWatch monitoring** — 5 custom metrics (`score_requests`, `bot_detections`, `human_detections`, `prediction_latency_ms`, `validation_errors`); 4 production alarms
 - **SNS alerting** — alarms publish to `HumanGuard-Alerts` topic; email subscription via `SNS_ALERT_EMAIL`
 - **Live dashboard** — S3-hosted dark-theme monitoring UI with real-time chart, prediction feed, and SHAP feature importance bars
-- **70 automated tests** — pytest suite covering API endpoints, feature extraction, classifier pipeline, SHAP output, DB layer, session scoring, and signal validation
+- **87 automated tests** — pytest suite covering API endpoints, feature extraction, classifier pipeline, SHAP output, DB layer, session scoring, signal validation, demo/export endpoints, model registry, and leaderboard
 
 ---
 

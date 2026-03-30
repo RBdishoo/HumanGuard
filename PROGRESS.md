@@ -175,8 +175,10 @@ The drift score (`max_prob_bot − mean_prob_bot`) detects sessions where bot pr
 | Resource | Value |
 |---|---|
 | **API (Lambda + API Gateway)** | `https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com` |
+| **Demo** | `http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com/demo.html` |
+| **Leaderboard** | `http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com/leaderboard.html` |
+| **Dashboard** | `http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com/dashboard.html` |
 | **RDS endpoint** | `humanguard-db.c8p60woyyitr.us-east-1.rds.amazonaws.com:5432` |
-| **S3 dashboard** | `http://humanguard-dashboard.s3-website-us-east-1.amazonaws.com` |
 | **SNS topic ARN** | `arn:aws:sns:us-east-1:796793347388:HumanGuard-Alerts` |
 | **Secrets Manager** | `humanGuard/rds` (us-east-1) |
 | **ECR repository** | `796793347388.dkr.ecr.us-east-1.amazonaws.com/humanguard` |
@@ -196,7 +198,7 @@ All alarms: `TreatMissingData=notBreaching`; `AlarmActions` and `OKActions` publ
 
 ## Test Coverage
 
-**70 tests across 9 test files — all passing.**
+**87 tests across 11 test files — all passing.**
 
 | File | Tests | What it covers |
 |---|---|---|
@@ -209,3 +211,6 @@ All alarms: `TreatMissingData=notBreaching`; `AlarmActions` and `OKActions` publ
 | `test_shap.py` | 6 | SHAP response structure; top-5 feature list length; `contribution` numeric type; `_SHAP_PENDING` sentinel (no `KeyError` when explainer key absent); graceful `None` return when explainer unavailable; `?explain=false` suppresses explanation |
 | `test_health.py` | 6 | `/health` 200 status; required fields (`status`, `model`, `version`, `uptime_seconds`, `timestamp`); uptime is float; no model artifact dependency |
 | `test_signal_collector.py` | 5 | `saveSignalBatch` JSONL write; batch count increment; session count deduplication; Lambda `/tmp` path redirect; file-not-found graceful handling |
+| `test_demo.py` | 6 | `source`/`label` fields accepted by `/api/signals` and `/api/score`; `/api/export` access control (missing key → 401, wrong key → 401, valid key → 200 CSV with correct columns) |
+| `test_leaderboard.py` | 6 | `POST /api/leaderboard` nickname/session_id validation; 404 for unknown session; rank and percentile message on success; `GET /api/leaderboard` entries with rank and stats; nickname sanitization (special chars stripped, max 20 chars) |
+| `test_model_registry.py` | 5 | `ModelRegistry.push()` returns semantic version; `load('latest')` resolves champion; `list_versions()` sorted ascending; `promote()` updates champion flag on old and new versions; `rollback()` reinstates previous champion |
