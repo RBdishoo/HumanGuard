@@ -626,10 +626,11 @@
     HumanGuard — Behavioral signals are analyzed in real time. No personal data is stored.
   </div>
 
+  <script src="config.js"></script>
   <script>
-    const API_BASE = window.location.hostname === 'localhost'
+    const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
       ? 'http://localhost:5050'
-      : window.location.origin;
+      : (window.HUMANGUARD_API || 'https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com');
 
     // ── Session setup ──────────────────────────────────────────────────
     const SESSION_ID = 'demo-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);

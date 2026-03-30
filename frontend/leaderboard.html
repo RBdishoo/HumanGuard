@@ -251,10 +251,11 @@
     HumanGuard Behavioral Bot Detection
   </div>
 
+  <script src="config.js"></script>
   <script>
-    const API_BASE = window.location.hostname === 'localhost'
+    const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
       ? 'http://localhost:5050'
-      : window.location.origin;
+      : (window.HUMANGUARD_API || 'https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com');
 
     let countdown = 60;
     let refreshTimer = null;
