@@ -494,6 +494,43 @@
     .lb-link a { color: #58a6ff; text-decoration: none; }
     .lb-link a:hover { text-decoration: underline; }
 
+    /* ── Share section ── */
+    .share-section {
+      margin-top: 20px;
+      padding-top: 18px;
+      border-top: 1px solid #21262d;
+    }
+    .share-title {
+      font-size: 10px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+    .share-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .btn-share {
+      padding: 9px 16px;
+      border: none;
+      border-radius: 6px;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      cursor: pointer;
+      text-transform: uppercase;
+      transition: opacity 0.2s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .btn-share:hover  { opacity: 0.85; }
+    .btn-share:active { transform: scale(0.97); }
+    .btn-share-linkedin { background: #0a66c2; color: #fff; }
+    .btn-share-twitter  { background: #1a1a1a; color: #fff; border: 1px solid #333; }
+    .btn-share-copy     { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
+
     @media (max-width: 640px) {
       body { padding: 24px 14px 40px; }
       .header h1 { font-size: 20px; }
@@ -590,6 +627,16 @@
             <div class="rank-number" id="rankNumber">—</div>
             <div class="rank-msg" id="rankMsg">—</div>
             <div class="percentile-msg" id="percentileMsg"></div>
+          </div>
+        </div>
+
+        <!-- Share -->
+        <div class="share-section" id="shareSection" style="display:none">
+          <div class="share-title">Share Your Result</div>
+          <div class="share-row">
+            <button class="btn-share btn-share-linkedin" onclick="shareLinkedIn()">LinkedIn</button>
+            <button class="btn-share btn-share-twitter" onclick="shareTwitter()">Twitter / X</button>
+            <button class="btn-share btn-share-copy" id="copyBtn" onclick="copyLink()">Copy Link</button>
           </div>
         </div>
 
@@ -808,7 +855,65 @@
 
       fetchCounter();
       document.getElementById('lbSubmit').classList.add('visible');
+
+      // Share section
+      const humanScore = 100 - pct;
+      _shareHumanScore = humanScore;
+      document.getElementById('shareSection').style.display = 'block';
+
       fetchLeaderboard();
+    }
+
+    // ── Share helpers ──────────────────────────────────────────────────
+    const DEMO_URL = 'https://d1hi33wespusty.cloudfront.net';
+    let _shareHumanScore = 0;
+
+    function buildShareMessage(score) {
+      if (score >= 90) {
+        return `I scored ${score}% human on HumanGuard's bot detector — it couldn't fool me. Can you beat my score?\n\n${DEMO_URL}`;
+      } else if (score >= 70) {
+        return `HumanGuard gave me a ${score}% human confidence score. Think you're more human than me?\n\n${DEMO_URL}`;
+      } else {
+        return `HumanGuard thinks I might be a bot (${score}% human). Prove you're more human:\n\n${DEMO_URL}`;
+      }
+    }
+
+    function shareLinkedIn() {
+      const url = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(DEMO_URL)}`;
+      window.open(url, '_blank', 'noopener,noreferrer,width=600,height=500');
+    }
+
+    function shareTwitter() {
+      const msg = buildShareMessage(_shareHumanScore);
+      const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(msg)}`;
+      window.open(url, '_blank', 'noopener,noreferrer,width=600,height=500');
+    }
+
+    function copyLink() {
+      navigator.clipboard.writeText(DEMO_URL).then(() => {
+        const btn = document.getElementById('copyBtn');
+        btn.textContent = 'Copied!';
+        btn.style.color = '#3fb950';
+        btn.style.borderColor = '#3fb950';
+        setTimeout(() => {
+          btn.textContent = 'Copy Link';
+          btn.style.color = '';
+          btn.style.borderColor = '';
+        }, 2000);
+      }).catch(() => {
+        // Fallback for older browsers
+        const ta = document.createElement('textarea');
+        ta.value = DEMO_URL;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        const btn = document.getElementById('copyBtn');
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy Link'; }, 2000);
+      });
     }
 
     function probColor(p) {
