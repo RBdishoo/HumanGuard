@@ -53,4 +53,28 @@ CREATE TABLE IF NOT EXISTS predictions (
 CREATE INDEX IF NOT EXISTS idx_predictions_session_id ON predictions (session_id);
 CREATE INDEX IF NOT EXISTS idx_predictions_created_at ON predictions (created_at);
 
+-- Leaderboard — public challenge entries
+CREATE TABLE IF NOT EXISTS leaderboard (
+    id          SERIAL PRIMARY KEY,
+    nickname    VARCHAR(30) NOT NULL,
+    prob_bot    DOUBLE PRECISION NOT NULL,
+    verdict     VARCHAR(10) NOT NULL,
+    session_id  VARCHAR(255) NOT NULL,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- API keys — multi-tenant scoring access
+CREATE TABLE IF NOT EXISTS api_keys (
+    id                  SERIAL PRIMARY KEY,
+    key                 VARCHAR(50) UNIQUE NOT NULL,
+    owner_email         VARCHAR(255) NOT NULL,
+    plan                VARCHAR(20) NOT NULL DEFAULT 'free',
+    monthly_limit       INTEGER NOT NULL DEFAULT 1000,
+    current_month_count INTEGER NOT NULL DEFAULT 0,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    active              BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys (key);
+
 COMMIT;

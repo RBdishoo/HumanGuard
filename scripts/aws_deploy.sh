@@ -25,6 +25,7 @@ API_NAME=humanguard-api
 CLOUDWATCH_ENABLED=true
 SNS_ALERT_EMAIL=${SNS_ALERT_EMAIL:-"rbdishoo@gmail.com"}
 DB_MAX_CONNECTIONS=5
+HUMANGUARD_MASTER_KEY=${HUMANGUARD_MASTER_KEY:-""}
 
 # Optional: set FRONTEND_S3_BUCKET to upload all frontend/ files to S3
 # e.g. FRONTEND_S3_BUCKET=humanguard-frontend ./scripts/aws_deploy.sh
@@ -161,7 +162,7 @@ aws lambda create-function \
     --role "$ROLE_ARN" \
     --memory-size 1024 \
     --timeout 30 \
-    --environment "Variables={PORT=8080,CLOUDWATCH_ENABLED=$CLOUDWATCH_ENABLED,SNS_ALERT_EMAIL=$SNS_ALERT_EMAIL,DATABASE_URL=$DATABASE_URL,DB_MAX_CONNECTIONS=$DB_MAX_CONNECTIONS}" \
+    --environment "Variables={PORT=8080,CLOUDWATCH_ENABLED=$CLOUDWATCH_ENABLED,SNS_ALERT_EMAIL=$SNS_ALERT_EMAIL,DATABASE_URL=$DATABASE_URL,DB_MAX_CONNECTIONS=$DB_MAX_CONNECTIONS,HUMANGUARD_MASTER_KEY=$HUMANGUARD_MASTER_KEY}" \
     --region "$AWS_REGION"
 echo "Lambda function '$FUNCTION_NAME' created."
 

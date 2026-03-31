@@ -15,6 +15,7 @@ failure so the JSONL path continues working uninterrupted.
 import json
 import logging
 import os
+import secrets
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -59,6 +60,17 @@ CREATE TABLE IF NOT EXISTS leaderboard (
     verdict     TEXT NOT NULL,
     session_id  TEXT NOT NULL,
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    key                 TEXT UNIQUE NOT NULL,
+    owner_email         TEXT NOT NULL,
+    plan                TEXT NOT NULL DEFAULT 'free',
+    monthly_limit       INTEGER NOT NULL DEFAULT 1000,
+    current_month_count INTEGER NOT NULL DEFAULT 0,
+    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    active              INTEGER NOT NULL DEFAULT 1
 );
 """
 
@@ -115,6 +127,17 @@ class DatabaseManager:
             "ALTER TABLE sessions ADD COLUMN source TEXT",
             "ALTER TABLE sessions ADD COLUMN label TEXT",
             "ALTER TABLE predictions ADD COLUMN source TEXT",
+            (
+                "CREATE TABLE IF NOT EXISTS api_keys ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "key TEXT UNIQUE NOT NULL, "
+                "owner_email TEXT NOT NULL, "
+                "plan TEXT NOT NULL DEFAULT 'free', "
+                "monthly_limit INTEGER NOT NULL DEFAULT 1000, "
+                "current_month_count INTEGER NOT NULL DEFAULT 0, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                "active INTEGER NOT NULL DEFAULT 1)"
+            ),
         ]:
             try:
                 conn.execute(migration_sql)
@@ -397,6 +420,176 @@ class DatabaseManager:
             "avg_prob_bot": round(avg, 4),
             "pct_human": round(human_count / total * 100, 1) if total else 0.0,
         }
+
+
+    # ── API Key Management ────────────────────────────────────────────────────
+
+    def generate_api_key(self, email: str, plan: str = "free", monthly_limit: int = 1000) -> str:
+        """Create and store a new API key; return the key string."""
+        key = "hg_live_" + secrets.token_hex(12)
+
+        if self._use_postgres:
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "INSERT INTO api_keys (key, owner_email, plan, monthly_limit) "
+                        "VALUES (%s, %s, %s, %s)",
+                        (key, email, plan, monthly_limit),
+                    )
+                    conn.commit()
+                finally:
+                    self._pg.release_connection(conn)
+            except Exception as exc:
+                logger.warning("DB generate_api_key failed: %s", exc)
+            return key
+
+        try:
+            with self._sqlite_cursor() as cur:
+                cur.execute(
+                    "INSERT INTO api_keys (key, owner_email, plan, monthly_limit) "
+                    "VALUES (?, ?, ?, ?)",
+                    (key, email, plan, monthly_limit),
+                )
+        except Exception as exc:
+            logger.warning("SQLite generate_api_key failed: %s", exc)
+        return key
+
+    def validate_api_key(self, key: str) -> dict | None:
+        """Return the key record if valid and active, else None."""
+        if not key:
+            return None
+
+        if self._use_postgres:
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT key, owner_email, plan, monthly_limit, current_month_count, active "
+                        "FROM api_keys WHERE key = %s",
+                        (key,),
+                    )
+                    row = cur.fetchone()
+                finally:
+                    self._pg.release_connection(conn)
+                if row is None or not row[5]:
+                    return None
+                return {
+                    "key": row[0], "owner_email": row[1], "plan": row[2],
+                    "monthly_limit": row[3], "current_month_count": row[4], "active": bool(row[5]),
+                }
+            except Exception as exc:
+                logger.warning("DB validate_api_key failed: %s", exc)
+                return None
+
+        try:
+            with self._sqlite_cursor() as cur:
+                cur.execute(
+                    "SELECT key, owner_email, plan, monthly_limit, current_month_count, active "
+                    "FROM api_keys WHERE key = ?",
+                    (key,),
+                )
+                row = cur.fetchone()
+            if row is None or not row["active"]:
+                return None
+            return {
+                "key": row["key"], "owner_email": row["owner_email"], "plan": row["plan"],
+                "monthly_limit": row["monthly_limit"], "current_month_count": row["current_month_count"],
+                "active": bool(row["active"]),
+            }
+        except Exception as exc:
+            logger.warning("SQLite validate_api_key failed: %s", exc)
+            return None
+
+    def increment_usage(self, key: str):
+        """Bump current_month_count for the given key."""
+        if self._use_postgres:
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "UPDATE api_keys SET current_month_count = current_month_count + 1 WHERE key = %s",
+                        (key,),
+                    )
+                    conn.commit()
+                finally:
+                    self._pg.release_connection(conn)
+            except Exception as exc:
+                logger.warning("DB increment_usage failed: %s", exc)
+            return
+
+        try:
+            with self._sqlite_cursor() as cur:
+                cur.execute(
+                    "UPDATE api_keys SET current_month_count = current_month_count + 1 WHERE key = ?",
+                    (key,),
+                )
+        except Exception as exc:
+            logger.warning("SQLite increment_usage failed: %s", exc)
+
+    def get_usage(self, key: str) -> dict:
+        """Return usage stats for the given key."""
+        empty = {"count": 0, "limit": 1000, "percentage_used": 0.0, "plan": "free"}
+
+        if self._use_postgres:
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT current_month_count, monthly_limit, plan FROM api_keys WHERE key = %s",
+                        (key,),
+                    )
+                    row = cur.fetchone()
+                finally:
+                    self._pg.release_connection(conn)
+                if row is None:
+                    return empty
+                count, limit, plan = int(row[0]), int(row[1]), row[2]
+            except Exception as exc:
+                logger.warning("DB get_usage failed: %s", exc)
+                return empty
+        else:
+            try:
+                with self._sqlite_cursor() as cur:
+                    cur.execute(
+                        "SELECT current_month_count, monthly_limit, plan FROM api_keys WHERE key = ?",
+                        (key,),
+                    )
+                    row = cur.fetchone()
+                if row is None:
+                    return empty
+                count, limit, plan = int(row["current_month_count"]), int(row["monthly_limit"]), row["plan"]
+            except Exception as exc:
+                logger.warning("SQLite get_usage failed: %s", exc)
+                return empty
+
+        pct = round(count / limit * 100, 1) if limit > 0 else 0.0
+        return {"count": count, "limit": limit, "percentage_used": pct, "plan": plan}
+
+    def reset_monthly_counts(self):
+        """Reset current_month_count to 0 for all keys (call on 1st of month)."""
+        if self._use_postgres:
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute("UPDATE api_keys SET current_month_count = 0")
+                    conn.commit()
+                finally:
+                    self._pg.release_connection(conn)
+            except Exception as exc:
+                logger.warning("DB reset_monthly_counts failed: %s", exc)
+            return
+
+        try:
+            with self._sqlite_cursor() as cur:
+                cur.execute("UPDATE api_keys SET current_month_count = 0")
+        except Exception as exc:
+            logger.warning("SQLite reset_monthly_counts failed: %s", exc)
 
 
 # Module-level singleton — import this everywhere

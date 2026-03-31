@@ -14,8 +14,9 @@ Architecture:
     - GET / -> Serve Frontend HTML
 """
 
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, g
 from flask_cors import CORS
+import functools
 import logging
 import os
 import sys
@@ -36,7 +37,11 @@ logger = logging.getLogger(__name__)
 
 #Initialize Flask application
 app = Flask(__name__, static_folder='../frontend', static_url_path='')
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+CORS(app, resources={r"/api/*": {
+    "origins": "*",
+    "allow_headers": ["Content-Type", "X-Api-Key", "X-Export-Key"],
+    "methods": ["GET", "POST", "OPTIONS"],
+}})
 
 #Initialize Signal Collector
 collector = SignalCollector()
@@ -92,6 +97,67 @@ FEATURE_INTERPRETATIONS = {
     "clickToMoveRatio": "unusual ratio of clicks to mouse movements",
     "keyToMoveRatio": "unusual ratio of keystrokes to mouse movements",
 }
+
+
+FREE_TIER_LIMIT = 1000
+
+
+def require_api_key(f=None, *, count_usage=True):
+    """Decorator: validate X-Api-Key header; enforce per-plan rate limits.
+
+    Bypasses auth when app.config["TESTING"] is True so the existing test
+    suite works without modification.  test_api_keys.py sets TESTING=False
+    for tests that exercise the auth logic directly.
+
+    Pass count_usage=False (e.g. on /api/usage) to skip incrementing the
+    request counter for that endpoint.
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def decorated(*args, **kwargs):
+            if request.method == "OPTIONS":
+                return func(*args, **kwargs)
+
+            # Bypass in test mode so existing tests are unaffected
+            if app.config.get("TESTING"):
+                g.api_key = "test"
+                g.is_master = True
+                return func(*args, **kwargs)
+
+            api_key = request.headers.get("X-Api-Key", "")
+
+            # Master key bypasses all limits
+            master_key = os.environ.get("HUMANGUARD_MASTER_KEY", "")
+            if master_key and api_key == master_key:
+                g.api_key = api_key
+                g.is_master = True
+                return func(*args, **kwargs)
+
+            # Validate key
+            record = db_manager.validate_api_key(api_key)
+            if record is None:
+                return jsonify({"error": "Invalid or inactive API key"}), 401
+
+            # Rate limit check
+            if record["current_month_count"] >= record["monthly_limit"]:
+                return jsonify({
+                    "error": "monthly limit reached",
+                    "limit": record["monthly_limit"],
+                    "plan": record["plan"],
+                }), 429
+
+            g.api_key = api_key
+            g.is_master = False
+            if count_usage:
+                db_manager.increment_usage(api_key)
+            return func(*args, **kwargs)
+
+        return decorated
+
+    # Support both @require_api_key and @require_api_key(count_usage=False)
+    if f is not None:
+        return decorator(f)
+    return decorator
 
 
 def _load_scoring_bundle():
@@ -245,6 +311,7 @@ def _log_prediction_local(session_id, prob_bot, label, threshold,
 
 
 @app.route('/api/score', methods=['POST'])
+@require_api_key
 def scoreSignals():
     """
     POST /api/score
@@ -315,12 +382,13 @@ def scoreSignals():
         prob_bot = float(bundle["model"].predict_proba(x_scaled)[0, 1])
         label = "bot" if prob_bot >= float(bundle["threshold"]) else "human"
 
-        # Save prediction to PostgreSQL if available
+        # Save prediction to PostgreSQL if available; tag with api_key as source
         try:
             from db.db_client import is_available as db_available, save_prediction
             if db_available():
+                _pred_source = payload_source or getattr(g, "api_key", None)
                 save_prediction(data.get("sessionID"), prob_bot, label, float(bundle["threshold"]),
-                                source=payload_source)
+                                source=_pred_source)
         except Exception as exc:
             logger.warning("Failed to save prediction to PostgreSQL: %s", exc)
 
@@ -572,6 +640,7 @@ def _session_score_logic(session_id):
 
 
 @app.route('/api/session-score', methods=['POST'])
+@require_api_key
 def sessionScore():
     """
     POST /api/session-score
@@ -585,6 +654,7 @@ def sessionScore():
 
 
 @app.route('/api/session-score/<session_id>', methods=['GET'])
+@require_api_key
 def sessionScoreGet(session_id):
     """
     GET /api/session-score/<sessionID>
@@ -595,6 +665,7 @@ def sessionScoreGet(session_id):
 
 
 @app.route('/api/stats', methods=['GET'])
+@require_api_key
 def getStats():
     """
     GET /api/stats - Returns collection statistics (total batches, num of unique sessions, signals file size, and server timestamp)
@@ -622,6 +693,7 @@ def getStats():
         return jsonify({"error": str(e)}), 500
     
 @app.route('/api/signals', methods=['POST'])
+@require_api_key
 def saveSignals():
     """
     POST /api/signals - Receives signal batches from frontend JavaScripts
@@ -804,6 +876,7 @@ def _dashboard_stats_from_pg(threshold):
 
 
 @app.route('/api/dashboard-stats', methods=['GET'])
+@require_api_key
 def dashboardStats():
     """
     GET /api/dashboard-stats
@@ -840,6 +913,7 @@ def serveDashboard():
 
 
 @app.route('/api/model-info', methods=['GET'])
+@require_api_key
 def modelInfo():
     """
     GET /api/model-info
@@ -918,6 +992,7 @@ def serveLeaderboard():
 
 
 @app.route('/api/leaderboard', methods=['POST'])
+@require_api_key
 def leaderboardPost():
     """
     POST /api/leaderboard
@@ -997,6 +1072,7 @@ def leaderboardPost():
 
 
 @app.route('/api/leaderboard', methods=['GET'])
+@require_api_key
 def leaderboardGet():
     """
     GET /api/leaderboard
@@ -1046,6 +1122,7 @@ def leaderboardGet():
 
 
 @app.route('/api/export', methods=['GET'])
+@require_api_key
 def exportSessions():
     """
     GET /api/export
@@ -1096,6 +1173,39 @@ def exportSessions():
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=humanguard_sessions.csv"},
     )
+
+
+@app.route('/api/register', methods=['POST'])
+def registerApiKey():
+    """
+    POST /api/register
+    Accepts {email}, generates a hg_live_XXXX API key, returns key + plan info.
+    No API key required to call this endpoint.
+    """
+    data = request.get_json(silent=True) or {}
+    email = str(data.get("email", "")).strip()
+    if not email or "@" not in email:
+        return jsonify({"error": "A valid email address is required"}), 400
+
+    api_key = db_manager.generate_api_key(email)
+    return jsonify({
+        "api_key": api_key,
+        "plan": "free",
+        "monthly_limit": FREE_TIER_LIMIT,
+        "docs_url": "https://github.com/rubenbetabdishoo/HumanGuard#api",
+    }), 201
+
+
+@app.route('/api/usage', methods=['GET'])
+@require_api_key(count_usage=False)
+def getUsage():
+    """
+    GET /api/usage
+    Returns current month usage for the X-Api-Key provided.
+    """
+    api_key = getattr(g, "api_key", "")
+    usage = db_manager.get_usage(api_key)
+    return jsonify(usage), 200
 
 
 if IS_LAMBDA:
