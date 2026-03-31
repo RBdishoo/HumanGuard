@@ -1,8 +1,6 @@
 {
   "version": 2,
   "outputDirectory": "frontend",
-  "cleanUrls": true,
-  "trailingSlash": false,
   "routes": [
     { "src": "/demo", "dest": "/demo.html" },
     { "src": "/leaderboard", "dest": "/leaderboard.html" },
