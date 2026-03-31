@@ -12,28 +12,66 @@
       color: #c9d1d9;
       font-family: 'Courier New', Courier, monospace;
       font-size: 14px;
-      padding: 20px;
       min-height: 100vh;
     }
+
+    /* ── Nav Bar ── */
+    .navbar {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 32px;
+      height: 48px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .nav-brand {
+      font-size: 13px;
+      font-weight: bold;
+      color: #58a6ff;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      text-decoration: none;
+      flex-shrink: 0;
+    }
+    .nav-links { display: flex; gap: 2px; }
+    .nav-link {
+      padding: 6px 12px;
+      font-size: 12px;
+      color: #8b949e;
+      text-decoration: none;
+      border-radius: 4px;
+      letter-spacing: 0.5px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .nav-link:hover { color: #c9d1d9; background: #21262d; }
+    .nav-link.active { color: #58a6ff; background: #1c2d40; }
+
+    /* ── Page container ── */
+    .page { padding: 20px 24px; }
 
     /* ── Header ── */
     .header {
       display: flex;
       justify-content: space-between;
-      align-items: center;
-      margin-bottom: 24px;
-      padding-bottom: 14px;
-      border-bottom: 1px solid #30363d;
+      align-items: flex-start;
+      margin-bottom: 20px;
     }
-    .header h1 {
-      font-size: 20px;
-      color: #58a6ff;
-      letter-spacing: 3px;
-      text-transform: uppercase;
+    .header-title {
+      font-size: 18px;
+      color: #c9d1d9;
+      letter-spacing: 1px;
     }
-    .header-right { text-align: right; }
-    .last-updated-label { font-size: 11px; color: #484f58; text-transform: uppercase; letter-spacing: 1px; }
-    .last-updated-val { font-size: 12px; color: #8b949e; margin-top: 2px; }
+    .header-sub {
+      font-size: 11px;
+      color: #484f58;
+      margin-top: 5px;
+    }
+    .last-updated-label { font-size: 10px; color: #484f58; text-transform: uppercase; letter-spacing: 1px; text-align: right; }
+    .last-updated-val { font-size: 12px; color: #8b949e; margin-top: 3px; text-align: right; }
 
     /* ── Stats Bar ── */
     .stats-bar {
@@ -63,6 +101,7 @@
     }
     .stat-card .card-value.red   { color: #f85149; }
     .stat-card .card-value.blue  { color: #58a6ff; }
+    .stat-card .card-value.green { color: #3fb950; }
     .stat-card .card-value.small { font-size: 18px; }
 
     /* ── Main two-column grid ── */
@@ -85,9 +124,15 @@
       color: #8b949e;
       text-transform: uppercase;
       letter-spacing: 1px;
-      margin-bottom: 14px;
+      margin-bottom: 6px;
       padding-bottom: 8px;
       border-bottom: 1px solid #21262d;
+    }
+    .section-desc {
+      font-size: 11px;
+      color: #484f58;
+      margin-bottom: 14px;
+      line-height: 1.6;
     }
 
     /* ── Feed ── */
@@ -144,8 +189,43 @@
       flex-shrink: 0;
     }
 
-    /* ── Canvas ── */
-    canvas { display: block; }
+    /* ── Canvas & Tooltip ── */
+    canvas { display: block; cursor: crosshair; }
+    .canvas-wrap { position: relative; }
+    .chart-tooltip {
+      position: absolute;
+      display: none;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 7px 11px;
+      font-size: 11px;
+      color: #c9d1d9;
+      pointer-events: none;
+      z-index: 10;
+      line-height: 1.7;
+      white-space: nowrap;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+
+    /* ── Chart Legend ── */
+    .chart-legend {
+      display: flex;
+      gap: 16px;
+      margin-top: 10px;
+      font-size: 11px;
+      color: #8b949e;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+    .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .legend-dash-line {
+      width: 20px;
+      height: 0;
+      border-top: 2px dashed rgba(248,81,73,0.8);
+      flex-shrink: 0;
+    }
 
     /* ── Feature bars ── */
     .feat-row {
@@ -184,6 +264,18 @@
       flex-shrink: 0;
     }
 
+    /* ── Loading spinner ── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      width: 22px;
+      height: 22px;
+      border: 2px solid #21262d;
+      border-top-color: #58a6ff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 32px auto;
+    }
+
     .empty-msg {
       color: #484f58;
       font-size: 12px;
@@ -197,7 +289,6 @@
       grid-template-columns: repeat(4, 1fr);
       gap: 12px;
     }
-    .mi-cell { }
     .mi-label {
       font-size: 10px;
       color: #484f58;
@@ -227,85 +318,109 @@
       margin-left: 6px;
       vertical-align: middle;
     }
-    @media (max-width: 900px) {
-      .model-info-grid { grid-template-columns: repeat(2, 1fr); }
-    }
 
     @media (max-width: 900px) {
       .stats-bar { grid-template-columns: repeat(2, 1fr); }
       .main-grid { grid-template-columns: 1fr; }
       .feat-name { width: 140px; }
+      .model-info-grid { grid-template-columns: repeat(2, 1fr); }
     }
   </style>
 </head>
 <body>
 
-  <!-- A) Header -->
-  <div class="header">
-    <h1>HumanGuard Dashboard</h1>
-    <div class="header-right" style="display:flex;align-items:center;gap:20px">
-      <div style="font-size:11px;color:#8b949e">
-        <a href="/demo" style="color:#58a6ff;text-decoration:none">Demo</a>
-        &nbsp;·&nbsp;
-        <a href="/leaderboard" style="color:#58a6ff;text-decoration:none">Leaderboard</a>
-        &nbsp;·&nbsp;
-        <a href="/simulate" style="color:#484f58;text-decoration:none">Simulator</a>
+  <!-- Nav Bar -->
+  <nav class="navbar">
+    <a href="/" class="nav-brand">HumanGuard</a>
+    <div class="nav-links">
+      <a href="/dashboard" class="nav-link active">Dashboard</a>
+      <a href="/demo" class="nav-link">Demo</a>
+      <a href="/leaderboard" class="nav-link">Leaderboard</a>
+    </div>
+  </nav>
+
+  <div class="page">
+
+    <!-- Header -->
+    <div class="header">
+      <div>
+        <div class="header-title">Live Monitoring Dashboard</div>
+        <div class="header-sub">Real-time bot detection &mdash; refreshes every 10 seconds</div>
       </div>
       <div>
         <div class="last-updated-label">Last updated</div>
-        <div class="last-updated-val" id="lastUpdated">—</div>
+        <div class="last-updated-val" id="lastUpdated">&mdash;</div>
       </div>
     </div>
-  </div>
 
-  <!-- B) Stats Bar -->
-  <div class="stats-bar">
-    <div class="stat-card">
-      <div class="card-label">Total Predictions</div>
-      <div class="card-value" id="statTotal">—</div>
+    <!-- Stats Bar -->
+    <div class="stats-bar">
+      <div class="stat-card">
+        <div class="card-label">Sessions Scored</div>
+        <div class="card-value" id="statTotal">&mdash;</div>
+      </div>
+      <div class="stat-card">
+        <div class="card-label">Bot Rate</div>
+        <div class="card-value red" id="statBotRate">&mdash;</div>
+      </div>
+      <div class="stat-card">
+        <div class="card-label">Avg Human Confidence</div>
+        <div class="card-value green" id="statHumanConf">&mdash;</div>
+      </div>
+      <div class="stat-card">
+        <div class="card-label">Active Model</div>
+        <div class="card-value small" id="statModel">&mdash;</div>
+      </div>
     </div>
-    <div class="stat-card">
-      <div class="card-label">Bot Rate</div>
-      <div class="card-value red" id="statBotRate">—</div>
-    </div>
-    <div class="stat-card">
-      <div class="card-label">Avg Response Time</div>
-      <div class="card-value blue" id="statAvgTime">—</div>
-    </div>
-    <div class="stat-card">
-      <div class="card-label">Model</div>
-      <div class="card-value small" id="statModel">—</div>
-    </div>
-  </div>
 
-  <!-- C+D) Main Grid: Feed + Chart -->
-  <div class="main-grid">
+    <!-- Main Grid: Feed + Chart -->
+    <div class="main-grid">
 
-    <!-- C) Live Prediction Feed -->
+      <!-- Live Feed -->
+      <div class="section">
+        <h2>Live Prediction Feed</h2>
+        <p class="section-desc">The 10 most recent scored sessions, newest first. The bar shows bot probability &mdash; green is human, yellow is uncertain, red is bot.</p>
+        <div id="predFeed"><div class="spinner"></div></div>
+      </div>
+
+      <!-- Drift Chart -->
+      <div class="section" id="chartSection">
+        <h2>Bot Probability Drift &mdash; Last 20 Sessions</h2>
+        <p class="section-desc">Each point is a scored session in chronological order. Points above the red dashed line were classified as bots. Hover a point for details.</p>
+        <div class="canvas-wrap">
+          <canvas id="driftCanvas" height="200"></canvas>
+          <div class="chart-tooltip" id="chartTooltip"></div>
+        </div>
+        <div class="chart-legend">
+          <span class="legend-item">
+            <span class="legend-dot" style="background:#3fb950"></span>Human
+          </span>
+          <span class="legend-item">
+            <span class="legend-dot" style="background:#f85149"></span>Bot
+          </span>
+          <span class="legend-item">
+            <span class="legend-dash-line"></span>Threshold (0.5)
+          </span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Feature Importance -->
+    <div class="section" style="margin-bottom:16px">
+      <h2>Top Flagged Features &mdash; Bot Detections (SHAP)</h2>
+      <p class="section-desc">Features most responsible for recent bot classifications, ranked by SHAP importance. A higher rank means the feature had a stronger influence on the bot verdict.</p>
+      <div id="featImportance"><div class="spinner"></div></div>
+    </div>
+
+    <!-- Model Info -->
     <div class="section">
-      <h2>Live Prediction Feed</h2>
-      <div id="predFeed"><div class="empty-msg">No predictions yet</div></div>
+      <h2>Active Model</h2>
+      <p class="section-desc">Performance metrics for the currently deployed classifier, trained on labeled behavioral sessions.</p>
+      <div id="modelInfoContent"><div class="spinner"></div></div>
     </div>
 
-    <!-- D) Drift Chart -->
-    <div class="section" id="chartSection">
-      <h2>Prob Bot Drift — last 20 predictions</h2>
-      <canvas id="driftCanvas" height="200"></canvas>
-    </div>
-
-  </div>
-
-  <!-- E) Feature Importance -->
-  <div class="section">
-    <h2>Top Flagged Features — Bot Detections (SHAP)</h2>
-    <div id="featImportance"><div class="empty-msg">No bot detections with SHAP data yet</div></div>
-  </div>
-
-  <!-- F) Model Version Info -->
-  <div class="section" id="modelInfoSection" style="margin-top:16px">
-    <h2>Active Model</h2>
-    <div id="modelInfoContent"><div class="empty-msg">Loading model info…</div></div>
-  </div>
+  </div><!-- /.page -->
 
   <script src="config.js"></script>
   <script>
@@ -315,6 +430,7 @@
 
     const REFRESH_MS = 10000;
     let _lastData = null;
+    let _chartPoints = [];
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -337,8 +453,15 @@
       document.getElementById('statTotal').textContent = data.total_predictions ?? '—';
       document.getElementById('statBotRate').textContent =
         typeof data.bot_rate === 'number' ? (data.bot_rate * 100).toFixed(1) + '%' : '—';
-      document.getElementById('statAvgTime').textContent =
-        data.avg_response_time_ms ? data.avg_response_time_ms.toFixed(1) + ' ms' : '—';
+
+      // Avg human confidence: mean(1 - prob_bot) for human-labelled sessions
+      const humanPreds = (data.recent_predictions || []).filter(p => p.label !== 'bot');
+      const avgHumanConf = humanPreds.length > 0
+        ? humanPreds.reduce((s, p) => s + (1 - (p.prob_bot || 0)), 0) / humanPreds.length
+        : null;
+      document.getElementById('statHumanConf').textContent =
+        avgHumanConf != null ? (avgHumanConf * 100).toFixed(1) + '%' : '—';
+
       document.getElementById('statModel').textContent = data.model || '—';
       document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
     }
@@ -348,7 +471,7 @@
     function renderFeed(preds) {
       const el = document.getElementById('predFeed');
       if (!preds || preds.length === 0) {
-        el.innerHTML = '<div class="empty-msg">No predictions yet</div>';
+        el.innerHTML = '<div class="empty-msg">No predictions yet — submit a session via the demo to see results here.</div>';
         return;
       }
       el.innerHTML = preds.map(p => {
@@ -375,26 +498,37 @@
     function renderDriftChart(preds, threshold) {
       const canvas = document.getElementById('driftCanvas');
       const section = document.getElementById('chartSection');
-      const W = section.clientWidth - 32;  // section padding 16px each side
+      const W = section.clientWidth - 32;
       canvas.width = W;
       const H = canvas.height || 200;
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, W, H);
 
-      // Fill background
       ctx.fillStyle = '#161b22';
       ctx.fillRect(0, 0, W, H);
 
-      const PAD = { top: 16, right: 16, bottom: 28, left: 40 };
+      // Extra left padding for Y-axis label; extra bottom for X-axis label
+      const PAD = { top: 20, right: 20, bottom: 44, left: 58 };
       const cW = W - PAD.left - PAD.right;
       const cH = H - PAD.top - PAD.bottom;
 
-      // Use chronological order (feed returns most-recent-first → reverse)
-      const all = preds ? [...preds].reverse() : [];
-      const pts_data = all.slice(-20);
-      const n = pts_data.length;
+      // Y-axis label — rotated 90°
+      ctx.save();
+      ctx.translate(12, PAD.top + cH / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = '#8b949e';
+      ctx.font = '10px Courier New';
+      ctx.textAlign = 'center';
+      ctx.fillText('Bot Probability', 0, 0);
+      ctx.restore();
 
-      // Grid lines + Y labels
+      // X-axis label
+      ctx.fillStyle = '#8b949e';
+      ctx.font = '10px Courier New';
+      ctx.textAlign = 'center';
+      ctx.fillText('Session #', PAD.left + cW / 2, H - 4);
+
+      // Grid lines + Y tick labels
       ctx.font = '10px Courier New';
       ctx.textAlign = 'right';
       for (let i = 0; i <= 4; i++) {
@@ -413,7 +547,7 @@
       // Threshold line (red dashed)
       const thr = typeof threshold === 'number' ? threshold : 0.5;
       const thrY = PAD.top + cH * (1 - thr);
-      ctx.strokeStyle = 'rgba(248,81,73,0.7)';
+      ctx.strokeStyle = 'rgba(248,81,73,0.75)';
       ctx.lineWidth = 1;
       ctx.setLineDash([5, 4]);
       ctx.beginPath();
@@ -422,11 +556,17 @@
       ctx.stroke();
       ctx.setLineDash([]);
 
+      // Use chronological order (feed returns most-recent-first → reverse)
+      const all = preds ? [...preds].reverse() : [];
+      const pts_data = all.slice(-20);
+      const n = pts_data.length;
+
       if (n === 0) {
         ctx.fillStyle = '#484f58';
-        ctx.font = '12px Courier New';
+        ctx.font = '11px Courier New';
         ctx.textAlign = 'center';
-        ctx.fillText('No data yet', W / 2, H / 2);
+        ctx.fillText('No data yet — score a session to see the chart populate.', W / 2, PAD.top + cH / 2);
+        _chartPoints = [];
         return;
       }
 
@@ -435,6 +575,8 @@
         x: PAD.left + (n === 1 ? cW / 2 : (i / (n - 1)) * cW),
         y: PAD.top + cH * (1 - (p.prob_bot || 0)),
         label: p.label,
+        prob: p.prob_bot || 0,
+        idx: i + 1,
       }));
 
       // Line connecting dots
@@ -444,7 +586,7 @@
       pts.forEach((pt, i) => i === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y));
       ctx.stroke();
 
-      // Dots colored by label
+      // Dots — green = human, red = bot
       pts.forEach(pt => {
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
@@ -452,28 +594,72 @@
         ctx.fill();
       });
 
-      // X axis index labels
+      // X tick labels (just below chart area)
       ctx.fillStyle = '#484f58';
       ctx.font = '9px Courier New';
       ctx.textAlign = 'center';
       const labelStep = n <= 6 ? 1 : Math.ceil(n / 6);
       pts.forEach((pt, i) => {
         if (i === 0 || i === n - 1 || i % labelStep === 0) {
-          ctx.fillText(String(i + 1), pt.x, H - 8);
+          ctx.fillText(String(i + 1), pt.x, PAD.top + cH + 16);
         }
       });
+
+      // Store for tooltip
+      _chartPoints = pts;
     }
+
+    // ── Chart Tooltip ─────────────────────────────────────────────────────
+
+    (function setupTooltip() {
+      const canvas = document.getElementById('driftCanvas');
+      const tooltip = document.getElementById('chartTooltip');
+
+      canvas.addEventListener('mousemove', function(e) {
+        const canvasRect = canvas.getBoundingClientRect();
+        const mx = (e.clientX - canvasRect.left) * (canvas.width / canvasRect.width);
+        const my = (e.clientY - canvasRect.top) * (canvas.height / canvasRect.height);
+
+        let closest = null;
+        let minDist = 20;
+        for (const pt of _chartPoints) {
+          const d = Math.hypot(pt.x - mx, pt.y - my);
+          if (d < minDist) { minDist = d; closest = pt; }
+        }
+
+        if (closest) {
+          const verdict = closest.label === 'bot' ? 'Bot' : 'Human';
+          const color = closest.label === 'bot' ? '#f85149' : '#3fb950';
+          tooltip.innerHTML =
+            `<strong>Session #${closest.idx}</strong><br>` +
+            `Prob(bot): ${(closest.prob * 100).toFixed(1)}%<br>` +
+            `Verdict: <span style="color:${color}">${verdict}</span>`;
+          tooltip.style.display = 'block';
+          const wrapRect = canvas.parentElement.getBoundingClientRect();
+          let tx = e.clientX - wrapRect.left + 14;
+          let ty = e.clientY - wrapRect.top - 56;
+          if (ty < 0) ty = e.clientY - wrapRect.top + 14;
+          tooltip.style.left = tx + 'px';
+          tooltip.style.top  = ty + 'px';
+        } else {
+          tooltip.style.display = 'none';
+        }
+      });
+
+      canvas.addEventListener('mouseleave', function() {
+        tooltip.style.display = 'none';
+      });
+    })();
 
     // ── Feature Importance ────────────────────────────────────────────────
 
     function renderFeatures(features) {
       const el = document.getElementById('featImportance');
       if (!features || features.length === 0) {
-        el.innerHTML = '<div class="empty-msg">No bot detections with SHAP data yet</div>';
+        el.innerHTML = '<div class="empty-msg">No bot detections with SHAP data yet — classify a bot session to see the top features here.</div>';
         return;
       }
       el.innerHTML = features.map((name, i) => {
-        // Rank 1 = 100%, each subsequent = 15% less (visual only)
         const barW = Math.max(10, 100 - i * 15);
         return `<div class="feat-row">
           <span class="feat-name" title="${name}">${name}</span>
@@ -499,6 +685,14 @@
         renderFeatures(data.top_flagged_features);
       } catch (e) {
         console.error('Dashboard refresh error:', e);
+        const feed = document.getElementById('predFeed');
+        if (feed.querySelector('.spinner')) {
+          feed.innerHTML = '<div class="empty-msg">Could not connect to the API — is the server running?</div>';
+        }
+        const feat = document.getElementById('featImportance');
+        if (feat.querySelector('.spinner')) {
+          feat.innerHTML = '<div class="empty-msg">No data available.</div>';
+        }
       }
     }
 
@@ -511,7 +705,7 @@
       } catch (_) {}
     }
 
-    // ── Model Info Card ───────────────────────────────────────────────────────
+    // ── Model Info Card ───────────────────────────────────────────────────
 
     function fmtDate(iso) {
       if (!iso) return '—';
@@ -525,9 +719,13 @@
     }
 
     async function fetchModelInfo() {
+      const el = document.getElementById('modelInfoContent');
       try {
         const resp = await fetch(`${API_BASE}/api/model-info`);
-        if (!resp.ok) return;
+        if (!resp.ok) {
+          el.innerHTML = '<div class="empty-msg">Model info unavailable.</div>';
+          return;
+        }
         const d = await resp.json();
 
         const version   = d.version || '—';
@@ -540,7 +738,12 @@
           ? Number(d.training_samples).toLocaleString() : '—';
         const badgeHtml = isChamp ? '<span class="mi-badge">champion</span>' : '';
 
-        document.getElementById('modelInfoContent').innerHTML = `
+        // Sync stats bar model label with model-info
+        if (d.model_type || d.version) {
+          document.getElementById('statModel').textContent = d.model_type || d.version;
+        }
+
+        el.innerHTML = `
           <div class="model-info-grid">
             <div class="mi-cell">
               <div class="mi-label">Version</div>
@@ -568,7 +771,9 @@
             </div>
           </div>
         `;
-      } catch (_) {}
+      } catch (_) {
+        el.innerHTML = '<div class="empty-msg">Model info unavailable.</div>';
+      }
     }
 
     window.addEventListener('resize', () => {
