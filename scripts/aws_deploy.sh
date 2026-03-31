@@ -47,6 +47,26 @@ if [ -z "$HUMANGUARD_MASTER_KEY" ]; then
   fi
 fi
 
+# Fetch EXPORT_API_KEY from Secrets Manager; generate and store one on first run.
+EXPORT_API_KEY=${EXPORT_API_KEY:-""}
+if [ -z "$EXPORT_API_KEY" ]; then
+  if EXPORT_KEY_JSON=$(aws secretsmanager get-secret-value \
+      --secret-id "humanGuard/exportKey" \
+      --region "$AWS_REGION" \
+      --query "SecretString" \
+      --output text 2>/dev/null); then
+    EXPORT_API_KEY=$(echo "$EXPORT_KEY_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['key'])")
+    echo "Export API key loaded from Secrets Manager."
+  else
+    EXPORT_API_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+    aws secretsmanager create-secret \
+        --name "humanGuard/exportKey" \
+        --secret-string "{\"key\":\"$EXPORT_API_KEY\"}" \
+        --region "$AWS_REGION" > /dev/null
+    echo "New export API key generated and stored in Secrets Manager as humanGuard/exportKey."
+  fi
+fi
+
 # Optional: set FRONTEND_S3_BUCKET to upload all frontend/ files to S3
 # e.g. FRONTEND_S3_BUCKET=humanguard-frontend ./scripts/aws_deploy.sh
 FRONTEND_S3_BUCKET=${FRONTEND_S3_BUCKET:-""}
@@ -174,7 +194,7 @@ sleep 10
 echo ""
 echo "--- Step 6: Create or update Lambda function ---"
 
-ENV_VARS="Variables={PORT=8080,CLOUDWATCH_ENABLED=$CLOUDWATCH_ENABLED,SNS_ALERT_EMAIL=$SNS_ALERT_EMAIL,DATABASE_URL=$DATABASE_URL,DB_MAX_CONNECTIONS=$DB_MAX_CONNECTIONS,HUMANGUARD_MASTER_KEY=$HUMANGUARD_MASTER_KEY}"
+ENV_VARS="Variables={PORT=8080,CLOUDWATCH_ENABLED=$CLOUDWATCH_ENABLED,SNS_ALERT_EMAIL=$SNS_ALERT_EMAIL,DATABASE_URL=$DATABASE_URL,DB_MAX_CONNECTIONS=$DB_MAX_CONNECTIONS,HUMANGUARD_MASTER_KEY=$HUMANGUARD_MASTER_KEY,EXPORT_API_KEY=$EXPORT_API_KEY}"
 
 if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$AWS_REGION" > /dev/null 2>&1; then
     echo "Lambda function '$FUNCTION_NAME' exists — updating code and configuration."
