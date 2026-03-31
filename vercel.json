@@ -1,6 +1,8 @@
 {
   "version": 2,
   "outputDirectory": "frontend",
+  "cleanUrls": true,
+  "trailingSlash": false,
   "routes": [
     { "src": "/demo", "dest": "/demo.html" },
     { "src": "/leaderboard", "dest": "/leaderboard.html" },
@@ -9,6 +11,7 @@
     { "src": "/client", "dest": "/client_dashboard.html" },
     { "src": "/bot-simulator", "dest": "/bot_simulator.html" },
     { "src": "/", "dest": "/demo.html" },
-    { "src": "/(.*)", "dest": "/$1" }
+    { "src": "/(.*)\\.html", "dest": "/$1.html" },
+    { "src": "/(.*)", "dest": "/$1.html" }
   ]
 }
