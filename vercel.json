@@ -1,17 +1,14 @@
 {
   "version": 2,
   "outputDirectory": "frontend",
-  "builds": [
-    {
-      "src": "frontend/**/*",
-      "use": "@vercel/static"
-    }
-  ],
   "routes": [
-    { "src": "/demo", "dest": "/frontend/demo.html" },
-    { "src": "/leaderboard", "dest": "/frontend/leaderboard.html" },
-    { "src": "/dashboard", "dest": "/frontend/dashboard.html" },
-    { "src": "/register", "dest": "/frontend/register.html" },
-    { "src": "/(.*)", "dest": "/frontend/$1" }
+    { "src": "/demo", "dest": "/demo.html" },
+    { "src": "/leaderboard", "dest": "/leaderboard.html" },
+    { "src": "/dashboard", "dest": "/dashboard.html" },
+    { "src": "/register", "dest": "/register.html" },
+    { "src": "/client", "dest": "/client_dashboard.html" },
+    { "src": "/bot-simulator", "dest": "/bot_simulator.html" },
+    { "src": "/", "dest": "/demo.html" },
+    { "src": "/(.*)", "dest": "/$1" }
   ]
 }
