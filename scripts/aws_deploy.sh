@@ -25,7 +25,27 @@ API_NAME=humanguard-api
 CLOUDWATCH_ENABLED=true
 SNS_ALERT_EMAIL=${SNS_ALERT_EMAIL:-"rbdishoo@gmail.com"}
 DB_MAX_CONNECTIONS=5
+
+# Fetch master key from Secrets Manager; generate and store one on first run.
 HUMANGUARD_MASTER_KEY=${HUMANGUARD_MASTER_KEY:-""}
+if [ -z "$HUMANGUARD_MASTER_KEY" ]; then
+  if MASTER_KEY_JSON=$(aws secretsmanager get-secret-value \
+      --secret-id "humanGuard/masterKey" \
+      --region "$AWS_REGION" \
+      --query "SecretString" \
+      --output text 2>/dev/null); then
+    HUMANGUARD_MASTER_KEY=$(echo "$MASTER_KEY_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['key'])")
+    echo "Master key loaded from Secrets Manager."
+  else
+    HUMANGUARD_MASTER_KEY="hg_master_$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+    aws secretsmanager create-secret \
+        --name "humanGuard/masterKey" \
+        --secret-string "{\"key\":\"$HUMANGUARD_MASTER_KEY\"}" \
+        --region "$AWS_REGION" > /dev/null
+    echo "New master key generated and stored in Secrets Manager as humanGuard/masterKey."
+    echo "  HUMANGUARD_MASTER_KEY: $HUMANGUARD_MASTER_KEY"
+  fi
+fi
 
 # Optional: set FRONTEND_S3_BUCKET to upload all frontend/ files to S3
 # e.g. FRONTEND_S3_BUCKET=humanguard-frontend ./scripts/aws_deploy.sh
@@ -147,82 +167,109 @@ echo "Waiting 10 seconds for IAM role propagation..."
 sleep 10
 
 # ---------------------------------------------------------------
-# STEP 6: Create Lambda function (image-based)
-# Deploys the container as a Lambda function with 1024MB memory,
-# 30-second timeout, and PORT=8080 matching the Dockerfile.
+# STEP 6: Create or update Lambda function (image-based)
+# Creates the function on first deploy; updates code + config on
+# subsequent deploys. Waits for the function to reach Active/Updated.
 # ---------------------------------------------------------------
 echo ""
-echo "--- Step 6: Create Lambda function ---"
+echo "--- Step 6: Create or update Lambda function ---"
 
-# Create the Lambda function from the ECR container image
-aws lambda create-function \
-    --function-name "$FUNCTION_NAME" \
-    --package-type Image \
-    --code "ImageUri=$IMAGE_URI" \
-    --role "$ROLE_ARN" \
-    --memory-size 1024 \
-    --timeout 30 \
-    --environment "Variables={PORT=8080,CLOUDWATCH_ENABLED=$CLOUDWATCH_ENABLED,SNS_ALERT_EMAIL=$SNS_ALERT_EMAIL,DATABASE_URL=$DATABASE_URL,DB_MAX_CONNECTIONS=$DB_MAX_CONNECTIONS,HUMANGUARD_MASTER_KEY=$HUMANGUARD_MASTER_KEY}" \
-    --region "$AWS_REGION"
-echo "Lambda function '$FUNCTION_NAME' created."
+ENV_VARS="Variables={PORT=8080,CLOUDWATCH_ENABLED=$CLOUDWATCH_ENABLED,SNS_ALERT_EMAIL=$SNS_ALERT_EMAIL,DATABASE_URL=$DATABASE_URL,DB_MAX_CONNECTIONS=$DB_MAX_CONNECTIONS,HUMANGUARD_MASTER_KEY=$HUMANGUARD_MASTER_KEY}"
 
-# Wait for the function to become Active before proceeding
-echo "Waiting for Lambda function to become Active..."
-aws lambda wait function-active-v2 \
-    --function-name "$FUNCTION_NAME" \
-    --region "$AWS_REGION"
-echo "Lambda function is Active."
+if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$AWS_REGION" > /dev/null 2>&1; then
+    echo "Lambda function '$FUNCTION_NAME' exists — updating code and configuration."
+    aws lambda update-function-code \
+        --function-name "$FUNCTION_NAME" \
+        --image-uri "$IMAGE_URI" \
+        --region "$AWS_REGION" > /dev/null
+    echo "Waiting for code update to complete..."
+    aws lambda wait function-updated-v2 \
+        --function-name "$FUNCTION_NAME" \
+        --region "$AWS_REGION"
+    aws lambda update-function-configuration \
+        --function-name "$FUNCTION_NAME" \
+        --memory-size 1024 \
+        --timeout 30 \
+        --environment "$ENV_VARS" \
+        --region "$AWS_REGION" > /dev/null
+    echo "Waiting for configuration update to complete..."
+    aws lambda wait function-updated-v2 \
+        --function-name "$FUNCTION_NAME" \
+        --region "$AWS_REGION"
+    echo "Lambda function '$FUNCTION_NAME' updated."
+else
+    aws lambda create-function \
+        --function-name "$FUNCTION_NAME" \
+        --package-type Image \
+        --code "ImageUri=$IMAGE_URI" \
+        --role "$ROLE_ARN" \
+        --memory-size 1024 \
+        --timeout 30 \
+        --environment "$ENV_VARS" \
+        --region "$AWS_REGION"
+    echo "Waiting for Lambda function to become Active..."
+    aws lambda wait function-active-v2 \
+        --function-name "$FUNCTION_NAME" \
+        --region "$AWS_REGION"
+    echo "Lambda function '$FUNCTION_NAME' created."
+fi
 
 # ---------------------------------------------------------------
-# STEP 7: Create API Gateway HTTP API with ANY /{proxy+} → Lambda
-# Sets up an HTTP API (v2) with a default stage that routes all
-# requests to the Lambda function, preserving the URL path.
+# STEP 7: Create or reuse API Gateway HTTP API
+# On first deploy, creates the API; on subsequent deploys, reuses
+# the existing one by name lookup.
 # ---------------------------------------------------------------
 echo ""
-echo "--- Step 7: Create API Gateway HTTP API ---"
+echo "--- Step 7: Create or reuse API Gateway HTTP API ---"
 
-# Create the HTTP API with a direct Lambda integration
-API_ID=$(aws apigatewayv2 create-api \
-    --name "$API_NAME" \
-    --protocol-type HTTP \
-    --target "arn:aws:lambda:${AWS_REGION}:${AWS_ACCOUNT_ID}:function:${FUNCTION_NAME}" \
+# Check if API already exists
+API_ID=$(aws apigatewayv2 get-apis \
     --region "$AWS_REGION" \
-    --query "ApiId" \
-    --output text)
-echo "API Gateway created: API_ID=$API_ID"
+    --query "Items[?Name=='$API_NAME'].ApiId | [0]" \
+    --output text 2>/dev/null)
 
-# Get the integration ID that was auto-created with --target
-INTEGRATION_ID=$(aws apigatewayv2 get-integrations \
-    --api-id "$API_ID" \
-    --region "$AWS_REGION" \
-    --query "Items[0].IntegrationId" \
-    --output text)
+if [ -n "$API_ID" ] && [ "$API_ID" != "None" ]; then
+    echo "API Gateway '$API_NAME' already exists: API_ID=$API_ID"
+else
+    API_ID=$(aws apigatewayv2 create-api \
+        --name "$API_NAME" \
+        --protocol-type HTTP \
+        --target "arn:aws:lambda:${AWS_REGION}:${AWS_ACCOUNT_ID}:function:${FUNCTION_NAME}" \
+        --region "$AWS_REGION" \
+        --query "ApiId" \
+        --output text)
+    echo "API Gateway created: API_ID=$API_ID"
 
-# Create a catch-all route so every path/method reaches Lambda
-aws apigatewayv2 create-route \
-    --api-id "$API_ID" \
-    --route-key 'ANY /{proxy+}' \
-    --target "integrations/$INTEGRATION_ID" \
-    --region "$AWS_REGION" > /dev/null
-echo "Route ANY /{proxy+} created."
+    INTEGRATION_ID=$(aws apigatewayv2 get-integrations \
+        --api-id "$API_ID" \
+        --region "$AWS_REGION" \
+        --query "Items[0].IntegrationId" \
+        --output text)
+
+    aws apigatewayv2 create-route \
+        --api-id "$API_ID" \
+        --route-key 'ANY /{proxy+}' \
+        --target "integrations/$INTEGRATION_ID" \
+        --region "$AWS_REGION" > /dev/null
+    echo "Route ANY /{proxy+} created."
+fi
 
 # ---------------------------------------------------------------
 # STEP 8: Grant API Gateway permission to invoke Lambda
-# Adds a resource-based policy on the Lambda function allowing
-# API Gateway to call it. Without this, requests return 500.
+# Skipped gracefully if the permission already exists.
 # ---------------------------------------------------------------
 echo ""
 echo "--- Step 8: Grant API Gateway → Lambda permission ---"
 
-# Allow API Gateway to invoke the Lambda function
 aws lambda add-permission \
     --function-name "$FUNCTION_NAME" \
     --statement-id "apigateway-invoke" \
     --action "lambda:InvokeFunction" \
     --principal "apigateway.amazonaws.com" \
     --source-arn "arn:aws:execute-api:${AWS_REGION}:${AWS_ACCOUNT_ID}:${API_ID}/*" \
-    --region "$AWS_REGION" > /dev/null
-echo "Permission granted."
+    --region "$AWS_REGION" > /dev/null 2>&1 \
+    && echo "Permission granted." \
+    || echo "Permission already exists, skipping."
 
 # ---------------------------------------------------------------
 # STEP 9: Print the live API Gateway URL

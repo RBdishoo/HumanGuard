@@ -5,7 +5,7 @@ var HUMANGUARD_API = 'https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com';
 
 // Master API key used by first-party pages (demo, dashboard, simulator).
 // Set HUMANGUARD_MASTER_KEY to your key before deploying.
-var HUMANGUARD_MASTER_KEY = '';
+var HUMANGUARD_MASTER_KEY = 'hg_master_cdf64cd876cfbb2adbf054b04f9b8f80';
 
 /**
  * Drop-in replacement for fetch() that automatically attaches the master

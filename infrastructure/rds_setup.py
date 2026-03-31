@@ -223,6 +223,41 @@ def add_leaderboard_table(database_url: str):
         conn.close()
 
 
+def add_api_keys_table(database_url: str):
+    """
+    Create api_keys table in PostgreSQL if it does not exist.
+    Safe to run multiple times.
+    """
+    import psycopg2
+
+    create_sql = """
+    CREATE TABLE IF NOT EXISTS api_keys (
+        id                  SERIAL PRIMARY KEY,
+        key                 VARCHAR(50) UNIQUE NOT NULL,
+        owner_email         VARCHAR(255) NOT NULL,
+        plan                VARCHAR(20) NOT NULL DEFAULT 'free',
+        monthly_limit       INTEGER NOT NULL DEFAULT 1000,
+        current_month_count INTEGER NOT NULL DEFAULT 0,
+        created_at          TIMESTAMPTZ DEFAULT NOW(),
+        active              BOOLEAN NOT NULL DEFAULT TRUE
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys (key);
+    """
+
+    conn = psycopg2.connect(database_url)
+    try:
+        cur = conn.cursor()
+        cur.execute(create_sql)
+        conn.commit()
+        print("  OK: api_keys table created (or already exists)")
+    except Exception as exc:
+        conn.rollback()
+        print(f"api_keys migration failed: {exc}")
+        raise
+    finally:
+        conn.close()
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -241,6 +276,7 @@ if __name__ == "__main__":
         print("=== HumanGuard Column Migration ===\n")
         add_source_label_columns(db_url)
         add_leaderboard_table(db_url)
+        add_api_keys_table(db_url)
         sys.exit(0)
 
     print(f"=== HumanGuard RDS Setup (region={REGION}) ===\n")
