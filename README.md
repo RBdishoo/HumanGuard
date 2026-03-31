@@ -11,6 +11,9 @@ Real-time bot detection API using behavioral biometrics and machine learning.
 | **Demo** (take the challenge) | https://d1hi33wespusty.cloudfront.net/demo.html |
 | **Leaderboard** | https://d1hi33wespusty.cloudfront.net/leaderboard.html |
 | **Dashboard** (monitoring) | https://d1hi33wespusty.cloudfront.net/dashboard.html |
+| **Register** (get an API key) | https://d1hi33wespusty.cloudfront.net/register.html |
+| **Client Dashboard** | https://d1hi33wespusty.cloudfront.net/client_dashboard.html |
+| **SDK** | https://d1hi33wespusty.cloudfront.net/sdk/humanGuard.min.js |
 | **Lambda API** | https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com |
 
 ---
@@ -58,7 +61,7 @@ Signal collection, model inference, and persistence are fully decoupled. A JSONL
 - **CloudWatch monitoring** — 5 custom metrics (`score_requests`, `bot_detections`, `human_detections`, `prediction_latency_ms`, `validation_errors`); 4 production alarms
 - **SNS alerting** — alarms publish to `HumanGuard-Alerts` topic; email subscription via `SNS_ALERT_EMAIL`
 - **Live dashboard** — S3-hosted dark-theme monitoring UI with real-time chart, prediction feed, and SHAP feature importance bars
-- **87 automated tests** — pytest suite covering API endpoints, feature extraction, classifier pipeline, SHAP output, DB layer, session scoring, signal validation, demo/export endpoints, model registry, and leaderboard
+- **112 automated tests** — pytest suite covering API endpoints, feature extraction, classifier pipeline, SHAP output, DB layer, session scoring, signal validation, demo/export endpoints, model registry, and leaderboard
 
 ---
 
@@ -189,7 +192,7 @@ Collection statistics plus live prediction counts from RDS.
 | **Alerting** | AWS SNS | Email notifications on alarm state transitions |
 | **Secrets** | AWS Secrets Manager | RDS credentials stored as `humanGuard/rds`; fetched at deploy time |
 | **Dashboard** | S3 static website | Zero-server frontend; canvas chart polling `/api/dashboard-stats` |
-| **Testing** | pytest | 87 tests across 11 test files |
+| **Testing** | pytest | 112 tests across 13 test files |
 
 ---
 

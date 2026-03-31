@@ -15,7 +15,7 @@
 | Dashboard | ✅ Complete | S3-hosted, polls `/api/dashboard-stats`, live chart + SHAP bars |
 | CloudFront | ✅ Complete | HTTPS distribution `E3F5RTWRNWWQB0`; HTTP→HTTPS redirect; tuned cache TTLs |
 | Adversarial Robustness | ✅ Complete | 100% session-level detection across 5 hard bot patterns; temporal drift scoring |
-| Tests | ✅ Complete | 87 tests across 11 files, all passing |
+| Tests | ✅ Complete | 112 tests across 13 files, all passing |
 
 ---
 
@@ -259,7 +259,7 @@ All alarms: `TreatMissingData=notBreaching`; `AlarmActions` and `OKActions` publ
 
 ## Test Coverage
 
-**87 tests across 11 test files — all passing.**
+**112 tests across 13 test files — all passing.**
 
 | File | Tests | What it covers |
 |---|---|---|
