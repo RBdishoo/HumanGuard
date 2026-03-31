@@ -1,0 +1,10 @@
+backend/
+infrastructure/
+scripts/
+tests/
+data/
+models/
+*.py
+requirements*.txt
+Dockerfile
+docker-compose.yml
