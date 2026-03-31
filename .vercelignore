@@ -1,9 +1,11 @@
+app.py
 backend/
 infrastructure/
 scripts/
 tests/
 data/
 models/
+venv/
 *.py
 requirements*.txt
 Dockerfile

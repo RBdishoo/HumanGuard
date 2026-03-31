@@ -1,16 +1,17 @@
 {
   "version": 2,
+  "outputDirectory": "frontend",
   "builds": [
     {
-      "src": "frontend/**",
+      "src": "frontend/**/*",
       "use": "@vercel/static"
     }
   ],
   "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/frontend/$1"
-    }
-  ],
-  "ignoreCommand": "exit 0"
+    { "src": "/demo", "dest": "/frontend/demo.html" },
+    { "src": "/leaderboard", "dest": "/frontend/leaderboard.html" },
+    { "src": "/dashboard", "dest": "/frontend/dashboard.html" },
+    { "src": "/register", "dest": "/frontend/register.html" },
+    { "src": "/(.*)", "dest": "/frontend/$1" }
+  ]
 }
