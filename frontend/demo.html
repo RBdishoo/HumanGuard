@@ -865,7 +865,7 @@
     }
 
     // ── Share helpers ──────────────────────────────────────────────────
-    const DEMO_URL = 'https://d1hi33wespusty.cloudfront.net';
+    const DEMO_URL = (typeof HUMANGUARD_SITE !== 'undefined') ? HUMANGUARD_SITE : 'https://humanguard.net';
     let _shareHumanScore = 0;
 
     function buildShareMessage(score) {

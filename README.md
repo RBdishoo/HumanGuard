@@ -8,12 +8,12 @@ Real-time bot detection API using behavioral biometrics and machine learning.
 
 | Page | URL |
 |---|---|
-| **Demo** (take the challenge) | https://d1hi33wespusty.cloudfront.net/demo.html |
-| **Leaderboard** | https://d1hi33wespusty.cloudfront.net/leaderboard.html |
-| **Dashboard** (monitoring) | https://d1hi33wespusty.cloudfront.net/dashboard.html |
-| **Register** (get an API key) | https://d1hi33wespusty.cloudfront.net/register.html |
-| **Client Dashboard** | https://d1hi33wespusty.cloudfront.net/client_dashboard.html |
-| **SDK** | https://d1hi33wespusty.cloudfront.net/sdk/humanGuard.min.js |
+| **Demo** (take the challenge) | https://humanguard.net/demo.html |
+| **Leaderboard** | https://humanguard.net/leaderboard.html |
+| **Dashboard** (monitoring) | https://humanguard.net/dashboard.html |
+| **Register** (get an API key) | https://humanguard.net/register.html |
+| **Client Dashboard** | https://humanguard.net/client_dashboard.html |
+| **SDK** | https://humanguard.net/sdk/humanGuard.min.js |
 | **Lambda API** | https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com |
 
 ---

@@ -13,7 +13,7 @@
 | Database | ✅ Complete | RDS PostgreSQL in production; SQLite auto-fallback for local dev |
 | Monitoring | ✅ Complete | 5 CloudWatch metrics, 4 alarms, SNS email alerts active |
 | Dashboard | ✅ Complete | S3-hosted, polls `/api/dashboard-stats`, live chart + SHAP bars |
-| CloudFront | ✅ Complete | HTTPS distribution `E3F5RTWRNWWQB0`; HTTP→HTTPS redirect; tuned cache TTLs |
+| CloudFront | ✅ Complete | HTTPS distribution `E3F5RTWRNWWQB0`; custom domain `humanguard.net`; HTTP→HTTPS redirect; tuned cache TTLs |
 | Adversarial Robustness | ✅ Complete | 100% session-level detection across 5 hard bot patterns; temporal drift scoring |
 | Tests | ✅ Complete | 112 tests across 13 files, all passing |
 
