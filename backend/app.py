@@ -19,9 +19,11 @@ from flask_cors import CORS
 import functools
 import logging
 import os
+import re
 import sys
 import json
 import time
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -101,6 +103,10 @@ FEATURE_INTERPRETATIONS = {
 
 FREE_TIER_LIMIT = 1000
 
+# IP-based rate limiting for /api/register
+_registration_attempts: dict = {}
+_registration_lock = threading.Lock()
+
 
 def require_api_key(f=None, *, count_usage=True):
     """Decorator: validate X-Api-Key header; enforce per-plan rate limits.
@@ -138,18 +144,23 @@ def require_api_key(f=None, *, count_usage=True):
             if record is None:
                 return jsonify({"error": "Invalid or inactive API key"}), 401
 
-            # Rate limit check
-            if record["current_month_count"] >= record["monthly_limit"]:
+            g.api_key = api_key
+            g.is_master = False
+            if count_usage:
+                # Atomic check-and-increment: only succeeds if under limit
+                result = db_manager.atomic_increment_usage(api_key)
+                if result is None:
+                    return jsonify({
+                        "error": "monthly limit reached",
+                        "limit": record["monthly_limit"],
+                        "plan": record["plan"],
+                    }), 429
+            elif record["current_month_count"] >= record["monthly_limit"]:
                 return jsonify({
                     "error": "monthly limit reached",
                     "limit": record["monthly_limit"],
                     "plan": record["plan"],
                 }), 429
-
-            g.api_key = api_key
-            g.is_master = False
-            if count_usage:
-                db_manager.increment_usage(api_key)
             return func(*args, **kwargs)
 
         return decorated
@@ -434,13 +445,14 @@ def scoreSignals():
 
         return jsonify(response), 200
 
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         metrics.record_lambda_error()
-        return jsonify({"Error": str(e)}), 503
-    except Exception as e:
+        app.logger.exception("Model artifacts not found")
+        return jsonify({"error": "internal server error"}), 503
+    except Exception:
         metrics.record_lambda_error()
-        logger.exception("Error scoring signals")
-        return jsonify({"Error": f"Server error: {str(e)}"}), 500
+        app.logger.exception("Error scoring signals")
+        return jsonify({"error": "internal server error"}), 500
 
 def _load_session_batches(session_id):
     """
@@ -635,11 +647,12 @@ def _session_score_logic(session_id):
 
         return response, 200
 
-    except FileNotFoundError as e:
-        return {"Error": str(e)}, 503
-    except Exception as e:
+    except FileNotFoundError:
+        logger.exception("Model artifacts not found in session scoring")
+        return {"error": "internal server error"}, 503
+    except Exception:
         logger.exception("Error in session scoring")
-        return {"Error": f"Server error: {str(e)}"}, 500
+        return {"error": "internal server error"}, 500
 
 
 @app.route('/api/session-score', methods=['POST'])
@@ -686,14 +699,14 @@ def getStats():
             "Total Batches": totalBatches,
             "Unique Sessions": uniqueSessions,
             "Signals File Size (in Kb)": round(fileSizeKb, 1),
-            "Signals File": signalsFile,
             "Server Timestamp": formatTimestamp(),
         }
         result.update(db_manager.get_stats())
         return jsonify(result), 200
-    
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+
+    except Exception:
+        app.logger.exception("Error getting stats")
+        return jsonify({"error": "internal server error"}), 500
     
 @app.route('/api/signals', methods=['POST'])
 @require_api_key
@@ -747,9 +760,10 @@ def saveSignals():
         else:
             return jsonify({"Error": "Failed to save batch"}), 500
         
-    except Exception as e:
-        return jsonify({"Error": f"Server error: {str(e)}"}), 500
-    
+    except Exception:
+        app.logger.exception("Error saving signals")
+        return jsonify({"error": "internal server error"}), 500
+
 @app.route('/', methods=['GET'])
 
 def serveFrontend():
@@ -904,9 +918,9 @@ def dashboardStats():
 
         return jsonify(_dashboard_stats_from_log(threshold)), 200
 
-    except Exception as e:
+    except Exception:
         logger.exception("Error getting dashboard stats")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "internal server error"}), 500
 
 
 @app.route('/dashboard', methods=['GET'])
@@ -1083,7 +1097,7 @@ def leaderboardGet():
     human_confidence percentage, verdict, and time_ago.
     """
     try:
-        limit = min(int(request.args.get("limit", 20)), 50)
+        limit = max(1, min(int(request.args.get("limit", 20)), 50))
         entries = db_manager.get_leaderboard(limit=limit)
         stats = db_manager.get_leaderboard_stats()
 
@@ -1137,7 +1151,9 @@ def exportSessions():
     from flask import Response
 
     api_key = request.headers.get("X-Export-Key", "")
-    export_key = os.environ.get("EXPORT_API_KEY", "devkey")
+    export_key = os.environ.get("EXPORT_API_KEY")
+    if not export_key:
+        return jsonify({"error": "export not configured"}), 503
     if not api_key or api_key != export_key:
         return jsonify({"error": "Unauthorized"}), 401
 
@@ -1256,9 +1272,20 @@ def registerApiKey():
     Accepts {email}, generates a hg_live_XXXX API key, returns key + plan info.
     No API key required to call this endpoint.
     """
+    # IP rate limit: max 3 registrations per IP per hour
+    client_ip = request.remote_addr or ""
+    now = time.time()
+    with _registration_lock:
+        attempts = _registration_attempts.get(client_ip, [])
+        attempts = [t for t in attempts if now - t < 3600]
+        if len(attempts) >= 3:
+            return jsonify({"error": "too many registrations from this IP"}), 429
+        attempts.append(now)
+        _registration_attempts[client_ip] = attempts
+
     data = request.get_json(silent=True) or {}
     email = str(data.get("email", "")).strip()
-    if not email or "@" not in email:
+    if not email or not re.match(r'^[^@]+@[^@]+\.[^@.]+$', email):
         return jsonify({"error": "A valid email address is required"}), 400
 
     api_key = db_manager.generate_api_key(email)
@@ -1302,7 +1329,7 @@ def clientPredictions():
     Returns recent predictions scoped to the calling API key.
     """
     api_key = getattr(g, "api_key", "")
-    limit = min(int(request.args.get("limit", 50)), 200)
+    limit = max(1, min(int(request.args.get("limit", 50)), 200))
     predictions = db_manager.get_client_predictions(api_key, limit=limit)
     # Serialize datetime objects
     for p in predictions:

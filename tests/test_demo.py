@@ -125,9 +125,20 @@ def test_score_accepts_source_and_label(tmp_path):
 # 3. /api/export returns 401 without a valid API key
 # ──────────────────────────────────────────────────────────────────────────────
 
-def test_export_requires_api_key():
-    """GET /api/export without X-Export-Key header returns 401."""
-    resp = _client().get("/api/export")
+def test_export_not_configured_returns_503():
+    """GET /api/export when EXPORT_API_KEY env var is unset returns 503."""
+    env_without_key = {k: v for k, v in os.environ.items() if k != "EXPORT_API_KEY"}
+    with mock.patch.dict(os.environ, env_without_key, clear=True):
+        resp = _client().get("/api/export")
+    assert resp.status_code == 503
+    body = json.loads(resp.data)
+    assert body.get("error") == "export not configured"
+
+
+def test_export_requires_export_key():
+    """GET /api/export without X-Export-Key header returns 401 when env is configured."""
+    with mock.patch.dict(os.environ, {"EXPORT_API_KEY": "secretkey"}):
+        resp = _client().get("/api/export")
     assert resp.status_code == 401
     body = json.loads(resp.data)
     assert "error" in body

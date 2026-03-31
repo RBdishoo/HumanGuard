@@ -537,6 +537,54 @@ class DatabaseManager:
         except Exception as exc:
             logger.warning("SQLite increment_usage failed: %s", exc)
 
+    def atomic_increment_usage(self, key: str) -> dict | None:
+        """Atomically increment usage only if the key is active and under its monthly limit.
+
+        Returns a dict with current_month_count/monthly_limit/plan on success,
+        or None if the quota is exhausted (or the key doesn't exist/is inactive).
+        """
+        if self._use_postgres:
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "UPDATE api_keys SET current_month_count = current_month_count + 1 "
+                        "WHERE key = %s AND active = true AND current_month_count < monthly_limit "
+                        "RETURNING current_month_count, monthly_limit, plan",
+                        (key,),
+                    )
+                    row = cur.fetchone()
+                    conn.commit()
+                finally:
+                    self._pg.release_connection(conn)
+                if row is None:
+                    return None
+                return {"current_month_count": row[0], "monthly_limit": row[1], "plan": row[2]}
+            except Exception as exc:
+                logger.warning("DB atomic_increment_usage failed: %s", exc)
+                return None
+
+        try:
+            with self._sqlite_cursor() as cur:
+                cur.execute(
+                    "UPDATE api_keys SET current_month_count = current_month_count + 1 "
+                    "WHERE key = ? AND active = 1 AND current_month_count < monthly_limit "
+                    "RETURNING current_month_count, monthly_limit, plan",
+                    (key,),
+                )
+                row = cur.fetchone()
+            if row is None:
+                return None
+            return {
+                "current_month_count": row["current_month_count"],
+                "monthly_limit": row["monthly_limit"],
+                "plan": row["plan"],
+            }
+        except Exception as exc:
+            logger.warning("SQLite atomic_increment_usage failed: %s", exc)
+            return None
+
     def get_usage(self, key: str) -> dict:
         """Return usage stats for the given key."""
         empty = {"count": 0, "limit": 1000, "percentage_used": 0.0, "plan": "free"}
