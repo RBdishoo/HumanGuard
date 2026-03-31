@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HumanGuard SDK — Integration Examples</title>
+  <style>
+    :root {
+      --bg:      #0d1117;
+      --surface: #161b22;
+      --border:  #30363d;
+      --text:    #e6edf3;
+      --muted:   #8b949e;
+      --green:   #3fb950;
+      --red:     #f85149;
+      --blue:    #58a6ff;
+      --yellow:  #d29922;
+      --purple:  #bc8cff;
+      --orange:  #ffa657;
+      --radius:  8px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Layout ── */
+    .header {
+      border-bottom: 1px solid var(--border);
+      padding: 24px 0;
+      text-align: center;
+    }
+    .header h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.5px; }
+    .header h1 span { color: var(--green); }
+    .header p { color: var(--muted); margin-top: 6px; }
+    .badge {
+      display: inline-block;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 3px 12px;
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 10px;
+    }
+
+    .container { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+
+    /* ── Section ── */
+    .section { margin-bottom: 60px; }
+    .section-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .section-num {
+      background: var(--blue);
+      color: #000;
+      font-weight: 700;
+      font-size: 13px;
+      border-radius: 50%;
+      width: 26px; height: 26px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .section h2 { font-size: 1.25rem; font-weight: 600; }
+    .section .desc { color: var(--muted); margin-bottom: 18px; font-size: 14px; }
+
+    /* ── Live demo card ── */
+    .demo-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    .demo-card h3 { font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 14px; }
+
+    /* ── Status indicator ── */
+    .status-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+    .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--yellow);
+      animation: pulse 2s infinite;
+    }
+    .dot.human { background: var(--green); animation: none; }
+    .dot.bot    { background: var(--red);   animation: none; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .status-text { font-size: 14px; }
+    .score-pill {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 2px 10px;
+      font-size: 13px;
+      font-family: monospace;
+    }
+
+    /* ── Form example ── */
+    .demo-form input[type=text], .demo-form input[type=email], .demo-form textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 9px 12px;
+      font-size: 14px;
+      margin-bottom: 10px;
+      outline: none;
+    }
+    .demo-form input:focus, .demo-form textarea:focus { border-color: var(--blue); }
+    .demo-form textarea { height: 80px; resize: vertical; }
+    .btn {
+      background: var(--green);
+      color: #000;
+      font-weight: 600;
+      font-size: 14px;
+      border: none;
+      border-radius: 6px;
+      padding: 9px 20px;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; opacity: 1; }
+    .form-msg { font-size: 13px; margin-top: 10px; min-height: 20px; }
+    .form-msg.ok  { color: var(--green); }
+    .form-msg.err { color: var(--red); }
+
+    /* ── Content gate ── */
+    .gate-locked, .gate-open { display: none; }
+    .gate-locked.visible, .gate-open.visible { display: block; }
+    .gate-open { background: linear-gradient(135deg, #0d2b1a 0%, #0d1117 100%); border: 1px solid var(--green); border-radius: var(--radius); padding: 20px; text-align: center; }
+    .gate-locked { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; color: var(--muted); }
+    .gate-open h4 { color: var(--green); margin-bottom: 6px; }
+
+    /* ── Code block ── */
+    .code-wrap {
+      background: #010409;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      position: relative;
+    }
+    .code-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .copy-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 3px 10px;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .copy-btn:hover { border-color: var(--blue); color: var(--blue); }
+    .copy-btn.copied { border-color: var(--green); color: var(--green); }
+    pre {
+      padding: 18px 20px;
+      overflow-x: auto;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      white-space: pre;
+    }
+    /* Syntax highlighting */
+    .kw  { color: var(--purple); }  /* keywords */
+    .st  { color: var(--orange); }  /* strings */
+    .cm  { color: var(--muted);  font-style: italic; } /* comments */
+    .fn  { color: var(--blue);   }  /* functions */
+    .at  { color: var(--green);  }  /* attributes */
+    .nu  { color: var(--orange); }  /* numbers */
+    .tg  { color: var(--red);    }  /* html tags */
+    .ev  { color: var(--yellow); }  /* events */
+
+    /* ── Divider ── */
+    hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+
+    /* ── Footer ── */
+    footer { text-align: center; color: var(--muted); font-size: 13px; padding: 30px 0; border-top: 1px solid var(--border); }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Human<span>Guard</span> SDK</h1>
+  <p>Three copy-paste integration examples for any website</p>
+  <div class="badge">v1.0.0 · No dependencies · &lt; 3 KB</div>
+</div>
+
+<div class="container">
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       EXAMPLE 1 — Basic drop-in
+       ═══════════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-label">
+      <div class="section-num">1</div>
+      <h2>Basic Drop-in</h2>
+    </div>
+    <p class="desc">
+      Add one script tag. HumanGuard automatically scores this session after 30 seconds
+      of behavioral signal collection. Watch the live status below change once scored.
+    </p>
+
+    <div class="demo-card">
+      <h3>Live Demo — This Page</h3>
+      <div class="status-row">
+        <div class="dot" id="dot1"></div>
+        <span class="status-text" id="status1">Collecting signals…</span>
+        <span class="score-pill" id="pill1" style="display:none"></span>
+      </div>
+      <div style="font-size:13px;color:var(--muted)" id="sessionLine1"></div>
+    </div>
+
+    <div class="code-wrap">
+      <div class="code-header">
+        <span>HTML</span>
+        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      </div>
+<pre><span class="cm">&lt;!-- 1. Add this to your &lt;head&gt; or before &lt;/body&gt; --&gt;</span>
+<span class="tg">&lt;script</span> <span class="at">src</span>=<span class="st">"https://d1hi33wespusty.cloudfront.net/sdk/humanGuard.min.js"</span>
+        <span class="at">data-api-key</span>=<span class="st">"hg_live_XXXX"</span><span class="tg">&gt;&lt;/script&gt;</span>
+
+<span class="cm">&lt;!-- That's it. Score is automatically collected after 30 seconds. --&gt;</span>
+
+<span class="cm">&lt;!-- Optional: listen for the result --&gt;</span>
+<span class="tg">&lt;script&gt;</span>
+  <span class="kw">document</span>.<span class="fn">addEventListener</span>(<span class="st">'humanGuard:scored'</span>, <span class="kw">function</span>(e) {
+    <span class="kw">console</span>.<span class="fn">log</span>(<span class="st">'Score:'</span>, e.detail.prob_bot, e.detail.label);
+  });
+<span class="tg">&lt;/script&gt;</span></pre>
+    </div>
+  </div>
+
+  <hr />
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       EXAMPLE 2 — Form protection
+       ═══════════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-label">
+      <div class="section-num">2</div>
+      <h2>Form Protection</h2>
+    </div>
+    <p class="desc">
+      Block form submission when <code style="background:var(--surface);padding:1px 5px;border-radius:4px">prob_bot > 0.8</code>.
+      Try submitting — the SDK scores immediately on submit and blocks bots before the form data is sent.
+    </p>
+
+    <div class="demo-card">
+      <h3>Contact Form Demo</h3>
+      <form class="demo-form" id="contactForm" onsubmit="handleFormSubmit(event)">
+        <input type="text"  placeholder="Your name"    required />
+        <input type="email" placeholder="Email address" required />
+        <textarea placeholder="Your message…"></textarea>
+        <button type="submit" class="btn" id="submitBtn">Send Message</button>
+        <div class="form-msg" id="formMsg"></div>
+      </form>
+    </div>
+
+    <div class="code-wrap">
+      <div class="code-header">
+        <span>HTML + JavaScript</span>
+        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      </div>
+<pre><span class="tg">&lt;script</span> <span class="at">src</span>=<span class="st">"https://d1hi33wespusty.cloudfront.net/sdk/humanGuard.min.js"</span>
+        <span class="at">data-api-key</span>=<span class="st">"hg_live_XXXX"</span>
+        <span class="at">data-auto-score</span>=<span class="st">"false"</span><span class="tg">&gt;&lt;/script&gt;</span>
+<span class="cm">&lt;!-- data-auto-score="false" disables the 30s timer; we score on submit --&gt;</span>
+
+<span class="tg">&lt;form</span> <span class="at">id</span>=<span class="st">"myForm"</span><span class="tg">&gt;</span>
+  <span class="tg">&lt;input</span> <span class="at">type</span>=<span class="st">"email"</span> <span class="at">placeholder</span>=<span class="st">"Email"</span> <span class="at">required</span> <span class="tg">/&gt;</span>
+  <span class="tg">&lt;button</span> <span class="at">type</span>=<span class="st">"submit"</span><span class="tg">&gt;</span>Submit<span class="tg">&lt;/button&gt;</span>
+<span class="tg">&lt;/form&gt;</span>
+
+<span class="tg">&lt;script&gt;</span>
+  <span class="kw">const</span> form = <span class="kw">document</span>.<span class="fn">getElementById</span>(<span class="st">'myForm'</span>);
+
+  form.<span class="fn">addEventListener</span>(<span class="st">'submit'</span>, <span class="kw">async function</span>(e) {
+    e.<span class="fn">preventDefault</span>();
+
+    <span class="cm">// Trigger scoring and wait for result</span>
+    window.HumanGuard.<span class="fn">score</span>();
+    <span class="kw">await new</span> <span class="fn">Promise</span>(resolve =>
+      window.HumanGuard.<span class="fn">onScore</span>(resolve)
+    );
+
+    <span class="kw">const</span> result = window.HumanGuard.<span class="fn">getScore</span>();
+    <span class="kw">if</span> (result.prob_bot > <span class="nu">0.8</span>) {
+      <span class="kw">document</span>.<span class="fn">getElementById</span>(<span class="st">'msg'</span>).textContent =
+        <span class="st">'Submission blocked: suspicious activity detected.'</span>;
+      <span class="kw">return</span>;
+    }
+
+    <span class="cm">// Safe — proceed with real submission</span>
+    form.<span class="fn">submit</span>();
+  });
+<span class="tg">&lt;/script&gt;</span>
+
+<span class="tg">&lt;div</span> <span class="at">id</span>=<span class="st">"msg"</span><span class="tg">&gt;&lt;/div&gt;</span></pre>
+    </div>
+  </div>
+
+  <hr />
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       EXAMPLE 3 — Custom callback / content gating
+       ═══════════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-label">
+      <div class="section-num">3</div>
+      <h2>Custom Callback &amp; Content Gating</h2>
+    </div>
+    <p class="desc">
+      Show premium content only to verified humans. The callback fires the moment
+      scoring completes — use <code style="background:var(--surface);padding:1px 5px;border-radius:4px">onScore()</code>
+      to update your UI in real time.
+    </p>
+
+    <div class="demo-card">
+      <h3>Premium Content Gate</h3>
+      <div class="gate-locked visible" id="gateLocked">
+        <div style="font-size:32px;margin-bottom:8px">🔒</div>
+        <div>Verifying you're human…</div>
+        <div style="font-size:12px;margin-top:6px">Results in ~30s</div>
+      </div>
+      <div class="gate-open" id="gateOpen">
+        <h4>✓ Human Verified</h4>
+        <p style="color:var(--muted);font-size:14px">Welcome! Your exclusive content is now unlocked.</p>
+      </div>
+      <div class="gate-locked" id="gateBotBlock" style="border-color:var(--red)">
+        <div style="font-size:32px;margin-bottom:8px">⚠️</div>
+        <div style="color:var(--red)">Bot activity detected</div>
+        <div style="font-size:12px;margin-top:6px;color:var(--muted)">Access to premium content restricted.</div>
+      </div>
+    </div>
+
+    <div class="code-wrap">
+      <div class="code-header">
+        <span>HTML + JavaScript</span>
+        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      </div>
+<pre><span class="tg">&lt;script</span> <span class="at">src</span>=<span class="st">"https://d1hi33wespusty.cloudfront.net/sdk/humanGuard.min.js"</span>
+        <span class="at">data-api-key</span>=<span class="st">"hg_live_XXXX"</span><span class="tg">&gt;&lt;/script&gt;</span>
+
+<span class="tg">&lt;div</span> <span class="at">id</span>=<span class="st">"locked"</span><span class="tg">&gt;</span>🔒 Verifying…<span class="tg">&lt;/div&gt;</span>
+<span class="tg">&lt;div</span> <span class="at">id</span>=<span class="st">"premium"</span> <span class="at">style</span>=<span class="st">"display:none"</span><span class="tg">&gt;</span>
+  Premium content here!
+<span class="tg">&lt;/div&gt;</span>
+
+<span class="tg">&lt;script&gt;</span>
+  window.HumanGuard.<span class="fn">onScore</span>(<span class="kw">function</span>(result) {
+    <span class="kw">const</span> isHuman = result.label === <span class="st">'human'</span>;
+
+    <span class="kw">document</span>.<span class="fn">getElementById</span>(<span class="st">'locked'</span>).style.display  = <span class="st">'none'</span>;
+    <span class="kw">document</span>.<span class="fn">getElementById</span>(<span class="st">'premium'</span>).style.display = isHuman ? <span class="st">'block'</span> : <span class="st">'none'</span>;
+
+    <span class="kw">if</span> (!isHuman) {
+      <span class="kw">document</span>.body.<span class="fn">insertAdjacentHTML</span>(<span class="st">'beforeend'</span>,
+        <span class="st">'&lt;p style="color:red"&gt;Bot activity detected.&lt;/p&gt;'</span>
+      );
+    }
+  });
+<span class="tg">&lt;/script&gt;</span></pre>
+    </div>
+  </div>
+
+  <hr />
+
+  <!-- API reference quick-ref -->
+  <div class="section">
+    <h2 style="margin-bottom:16px">SDK Reference</h2>
+    <div class="demo-card" style="padding:0;overflow:hidden">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:#0d1117">
+            <th style="padding:12px 16px;text-align:left;color:var(--muted);font-weight:500;border-bottom:1px solid var(--border)">Attribute / Method</th>
+            <th style="padding:12px 16px;text-align:left;color:var(--muted);font-weight:500;border-bottom:1px solid var(--border)">Type</th>
+            <th style="padding:12px 16px;text-align:left;color:var(--muted);font-weight:500;border-bottom:1px solid var(--border)">Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td style="padding:10px 16px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--green)">data-api-key</td><td style="padding:10px 16px;border-bottom:1px solid var(--border);color:var(--muted)">string</td><td style="padding:10px 16px;border-bottom:1px solid var(--border)">Required. Your <code style="background:var(--bg);padding:1px 5px;border-radius:3px">hg_live_*</code> API key.</td></tr>
+          <tr><td style="padding:10px 16px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--green)">data-threshold</td><td style="padding:10px 16px;border-bottom:1px solid var(--border);color:var(--muted)">float</td><td style="padding:10px 16px;border-bottom:1px solid var(--border)">Bot probability cutoff (default: <code style="background:var(--bg);padding:1px 5px;border-radius:3px">0.5</code>).</td></tr>
+          <tr><td style="padding:10px 16px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--green)">data-auto-score</td><td style="padding:10px 16px;border-bottom:1px solid var(--border);color:var(--muted)">boolean</td><td style="padding:10px 16px;border-bottom:1px solid var(--border)">Auto-score after delay (default: <code style="background:var(--bg);padding:1px 5px;border-radius:3px">true</code>).</td></tr>
+          <tr><td style="padding:10px 16px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--green)">data-delay</td><td style="padding:10px 16px;border-bottom:1px solid var(--border);color:var(--muted)">integer</td><td style="padding:10px 16px;border-bottom:1px solid var(--border)">Auto-score delay in ms (default: <code style="background:var(--bg);padding:1px 5px;border-radius:3px">30000</code>).</td></tr>
+          <tr><td style="padding:10px 16px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--green)">data-api-url</td><td style="padding:10px 16px;border-bottom:1px solid var(--border);color:var(--muted)">string</td><td style="padding:10px 16px;border-bottom:1px solid var(--border)">Override the HumanGuard API base URL.</td></tr>
+          <tr><td style="padding:10px 16px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--blue)">HumanGuard.getScore()</td><td style="padding:10px 16px;border-bottom:1px solid var(--border);color:var(--muted)">function</td><td style="padding:10px 16px;border-bottom:1px solid var(--border)">Returns current score object or <code style="background:var(--bg);padding:1px 5px;border-radius:3px">null</code>.</td></tr>
+          <tr><td style="padding:10px 16px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--blue)">HumanGuard.onScore(cb)</td><td style="padding:10px 16px;border-bottom:1px solid var(--border);color:var(--muted)">function</td><td style="padding:10px 16px;border-bottom:1px solid var(--border)">Register callback; fires immediately if already scored.</td></tr>
+          <tr><td style="padding:10px 16px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--blue)">HumanGuard.score()</td><td style="padding:10px 16px;border-bottom:1px solid var(--border);color:var(--muted)">function</td><td style="padding:10px 16px;border-bottom:1px solid var(--border)">Trigger scoring immediately. Idempotent.</td></tr>
+          <tr><td style="padding:10px 16px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--blue)">HumanGuard.sessionId</td><td style="padding:10px 16px;border-bottom:1px solid var(--border);color:var(--muted)">string</td><td style="padding:10px 16px;border-bottom:1px solid var(--border)">Current session identifier.</td></tr>
+          <tr><td style="padding:10px 16px;border-bottom:1px solid var(--border);font-family:monospace;color:var(--yellow)">humanGuard:scored</td><td style="padding:10px 16px;border-bottom:1px solid var(--border);color:var(--muted)">event</td><td style="padding:10px 16px;border-bottom:1px solid var(--border)">Fired on <code style="background:var(--bg);padding:1px 5px;border-radius:3px">document</code> with <code style="background:var(--bg);padding:1px 5px;border-radius:3px">e.detail = {prob_bot, label, threshold, session_id}</code>.</td></tr>
+          <tr><td style="padding:10px 16px;font-family:monospace;color:var(--yellow)">humanGuard:error</td><td style="padding:10px 16px;color:var(--muted)">event</td><td style="padding:10px 16px">Fired on <code style="background:var(--bg);padding:1px 5px;border-radius:3px">document</code> with <code style="background:var(--bg);padding:1px 5px;border-radius:3px">e.detail = {error}</code> on failure.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<footer>
+  <a href="https://github.com/rubenbetabdishoo/HumanGuard">HumanGuard</a> ·
+  <a href="https://d1hi33wespusty.cloudfront.net/sdk/humanGuard.min.js">SDK Download</a> ·
+  <a href="/docs/SDK.md">Full Docs</a>
+</footer>
+
+<!-- ── Live demo scripts ── -->
+<script src="humanGuard.min.js" data-api-key="hg_master_cdf64cd876cfbb2adbf054b04f9b8f80" data-delay="15000"></script>
+<script>
+  /* Example 1 — status display */
+  var dot1    = document.getElementById('dot1');
+  var status1 = document.getElementById('status1');
+  var pill1   = document.getElementById('pill1');
+  var sesLine = document.getElementById('sessionLine1');
+
+  if (window.HumanGuard) {
+    sesLine.textContent = 'Session: ' + window.HumanGuard.sessionId;
+  }
+
+  document.addEventListener('humanGuard:scored', function(e) {
+    var r = e.detail;
+    var isBot = r.label === 'bot';
+    dot1.className = 'dot ' + r.label;
+    status1.textContent = isBot ? 'Bot detected' : 'Human verified';
+    pill1.textContent   = 'prob_bot: ' + r.prob_bot.toFixed(3);
+    pill1.style.display = 'inline';
+    pill1.style.color   = isBot ? 'var(--red)' : 'var(--green)';
+  });
+
+  /* Example 2 — form protection */
+  function handleFormSubmit(e) {
+    e.preventDefault();
+    var btn = document.getElementById('submitBtn');
+    var msg = document.getElementById('formMsg');
+    btn.disabled    = true;
+    btn.textContent = 'Verifying…';
+    msg.className   = 'form-msg';
+    msg.textContent = '';
+
+    window.HumanGuard.score();
+    window.HumanGuard.onScore(function(result) {
+      if (result.prob_bot > 0.8) {
+        msg.className   = 'form-msg err';
+        msg.textContent = '⚠ Submission blocked: bot activity detected (score: ' + result.prob_bot.toFixed(2) + ')';
+        btn.disabled    = false;
+        btn.textContent = 'Send Message';
+      } else {
+        msg.className   = 'form-msg ok';
+        msg.textContent = '✓ Verified! Form would submit now (score: ' + result.prob_bot.toFixed(2) + ')';
+        btn.textContent = 'Sent!';
+      }
+    });
+  }
+
+  /* Example 3 — content gate */
+  window.HumanGuard.onScore(function(result) {
+    document.getElementById('gateLocked').className = 'gate-locked';
+    if (result.label === 'human') {
+      document.getElementById('gateOpen').className = 'gate-open visible';
+    } else {
+      document.getElementById('gateBotBlock').className = 'gate-locked visible';
+    }
+  });
+
+  /* Copy button */
+  function copyCode(btn) {
+    var pre = btn.closest('.code-wrap').querySelector('pre');
+    var text = pre.innerText || pre.textContent;
+    navigator.clipboard.writeText(text).then(function() {
+      btn.textContent = 'Copied!';
+      btn.className   = 'copy-btn copied';
+      setTimeout(function() {
+        btn.textContent = 'Copy';
+        btn.className   = 'copy-btn';
+      }, 2000);
+    });
+  }
+</script>
+
+</body>
+</html>
