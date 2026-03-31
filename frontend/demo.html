@@ -772,7 +772,7 @@
       };
 
       try {
-        const resp = await fetch(`${API_BASE}/api/score`, {
+        const resp = await humanguardFetch('/api/score', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -927,7 +927,7 @@
     // ── Counter ────────────────────────────────────────────────────────
     async function fetchCounter() {
       try {
-        const resp = await fetch(`${API_BASE}/api/dashboard-stats`);
+        const resp = await humanguardFetch('/api/dashboard-stats');
         if (!resp.ok) return;
         const data = await resp.json();
         const count = typeof data.human_count === 'number' ? data.human_count : '—';
@@ -947,7 +947,7 @@
       btn.textContent = '…';
 
       try {
-        const resp = await fetch(`${API_BASE}/api/leaderboard`, {
+        const resp = await humanguardFetch('/api/leaderboard', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ nickname, session_id: SESSION_ID }),
@@ -976,7 +976,7 @@
 
     async function fetchLeaderboard() {
       try {
-        const resp = await fetch(`${API_BASE}/api/leaderboard?limit=20`);
+        const resp = await humanguardFetch('/api/leaderboard?limit=20');
         if (!resp.ok) return;
         const data = await resp.json();
         const entries = data.entries || [];
