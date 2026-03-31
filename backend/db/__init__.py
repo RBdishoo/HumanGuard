@@ -12,6 +12,8 @@ Gracefully degrades: every public method silently returns empty/zero values on
 failure so the JSONL path continues working uninterrupted.
 """
 
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -23,6 +25,36 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 RETRAIN_THRESHOLD = 50
+
+
+# ── Key format helpers ────────────────────────────────────────────────────────
+# New format: hg_live_<8-char-id>.<32-char-secret>
+# Old format: hg_live_<24-char-hex>  (no dot — legacy, kept for backward compat)
+
+def _hash_secret(secret: str) -> str:
+    """Return SHA-256 hex digest of the raw secret."""
+    return hashlib.sha256(secret.encode()).hexdigest()
+
+
+def _split_key(key: str):
+    """Split 'hg_live_<id>.<secret>' → ('hg_live_<id>', '<secret>').
+
+    Returns (None, None) for old-format keys that contain no dot.
+    """
+    if not key or "." not in key:
+        return None, None
+    idx = key.index(".")
+    return key[:idx], key[idx + 1:]
+
+
+def _key_id_from_full(key: str) -> str:
+    """Return the non-secret identifier portion of a key.
+
+    New format → 'hg_live_<id>'   (strips the secret after the dot)
+    Old format → key unchanged     (used as-is for backward compat)
+    """
+    key_id, _ = _split_key(key)
+    return key_id if key_id else key
 
 _SQLITE_DDL = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -69,6 +101,8 @@ CREATE TABLE IF NOT EXISTS leaderboard (
 CREATE TABLE IF NOT EXISTS api_keys (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     key                 TEXT UNIQUE NOT NULL,
+    key_id              TEXT UNIQUE,
+    key_hash            TEXT,
     owner_email         TEXT NOT NULL,
     plan                TEXT NOT NULL DEFAULT 'free',
     monthly_limit       INTEGER NOT NULL DEFAULT 1000,
@@ -137,6 +171,8 @@ class DatabaseManager:
                 "CREATE TABLE IF NOT EXISTS api_keys ("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, "
                 "key TEXT UNIQUE NOT NULL, "
+                "key_id TEXT UNIQUE, "
+                "key_hash TEXT, "
                 "owner_email TEXT NOT NULL, "
                 "plan TEXT NOT NULL DEFAULT 'free', "
                 "monthly_limit INTEGER NOT NULL DEFAULT 1000, "
@@ -144,6 +180,8 @@ class DatabaseManager:
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
                 "active INTEGER NOT NULL DEFAULT 1)"
             ),
+            "ALTER TABLE api_keys ADD COLUMN key_id TEXT UNIQUE",
+            "ALTER TABLE api_keys ADD COLUMN key_hash TEXT",
         ]:
             try:
                 conn.execute(migration_sql)
@@ -211,13 +249,15 @@ class DatabaseManager:
                         features=None, threshold: float = 0.5,
                         scoring_type: str = "batch", source: str = None,
                         api_key: str = None):
-        """Persist a model prediction."""
+        """Persist a model prediction. Stores key_id (not the full secret key)."""
         label = "bot" if is_bot else "human"
+        # Store only the non-secret identifier so the predictions table never holds raw secrets
+        stored_key_id = _key_id_from_full(api_key) if api_key else None
 
         if self._use_postgres:
             try:
                 self._pg.save_prediction(session_id, score, label, threshold, scoring_type,
-                                         source=source, api_key=api_key)
+                                         source=source, api_key=stored_key_id)
             except Exception as exc:
                 logger.warning("DB save_prediction failed: %s", exc)
             return
@@ -232,7 +272,7 @@ class DatabaseManager:
                     "INSERT INTO predictions "
                     "(session_id, prob_bot, label, threshold, scoring_type, source, api_key) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (session_id, score, label, threshold, scoring_type, source, api_key),
+                    (session_id, score, label, threshold, scoring_type, source, stored_key_id),
                 )
         except Exception as exc:
             logger.warning("SQLite save_prediction failed: %s", exc)
@@ -432,8 +472,18 @@ class DatabaseManager:
     # ── API Key Management ────────────────────────────────────────────────────
 
     def generate_api_key(self, email: str, plan: str = "free", monthly_limit: int = 1000) -> str:
-        """Create and store a new API key; return the key string."""
-        key = "hg_live_" + secrets.token_hex(12)
+        """Create a new API key, store only the id + hash, return the full key once.
+
+        Key format: hg_live_<8-char-id>.<32-char-secret>
+        - id part  stored in key_id and key columns (non-secret, used for lookup)
+        - secret part hashed with SHA-256, stored in key_hash (raw secret never stored)
+        The full key is returned to the caller exactly once and is not retrievable later.
+        """
+        key_id_part = secrets.token_hex(4)   # 8 hex chars
+        secret_part = secrets.token_hex(16)  # 32 hex chars
+        full_key = f"hg_live_{key_id_part}.{secret_part}"
+        key_id = f"hg_live_{key_id_part}"
+        key_hash = _hash_secret(secret_part)
 
         if self._use_postgres:
             try:
@@ -441,40 +491,105 @@ class DatabaseManager:
                 try:
                     cur = conn.cursor()
                     cur.execute(
-                        "INSERT INTO api_keys (key, owner_email, plan, monthly_limit) "
-                        "VALUES (%s, %s, %s, %s)",
-                        (key, email, plan, monthly_limit),
+                        "INSERT INTO api_keys (key, key_id, key_hash, owner_email, plan, monthly_limit) "
+                        "VALUES (%s, %s, %s, %s, %s, %s)",
+                        (key_id, key_id, key_hash, email, plan, monthly_limit),
                     )
                     conn.commit()
                 finally:
                     self._pg.release_connection(conn)
             except Exception as exc:
                 logger.warning("DB generate_api_key failed: %s", exc)
-            return key
+            return full_key
 
         try:
             with self._sqlite_cursor() as cur:
                 cur.execute(
-                    "INSERT INTO api_keys (key, owner_email, plan, monthly_limit) "
-                    "VALUES (?, ?, ?, ?)",
-                    (key, email, plan, monthly_limit),
+                    "INSERT INTO api_keys (key, key_id, key_hash, owner_email, plan, monthly_limit) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (key_id, key_id, key_hash, email, plan, monthly_limit),
                 )
         except Exception as exc:
             logger.warning("SQLite generate_api_key failed: %s", exc)
-        return key
+        return full_key
 
     def validate_api_key(self, key: str) -> dict | None:
-        """Return the key record if valid and active, else None."""
+        """Return the key record if valid and active, else None.
+
+        New format (hg_live_<id>.<secret>):
+          - look up by key_id column, compare sha256(secret) with stored key_hash
+          - uses hmac.compare_digest() for constant-time comparison
+        Old format (no dot, legacy):
+          - look up by key column directly (backward compat)
+          - only succeeds for rows that have no key_hash (genuine old keys)
+        """
         if not key:
             return None
 
+        key_id, secret = _split_key(key)
+
+        if key_id and secret:
+            # ── New format ──────────────────────────────────────────────────
+            submitted_hash = _hash_secret(secret)
+
+            if self._use_postgres:
+                try:
+                    conn = self._pg.get_connection()
+                    try:
+                        cur = conn.cursor()
+                        cur.execute(
+                            "SELECT key_id, key_hash, owner_email, plan, monthly_limit, "
+                            "current_month_count, active "
+                            "FROM api_keys WHERE key_id = %s",
+                            (key_id,),
+                        )
+                        row = cur.fetchone()
+                    finally:
+                        self._pg.release_connection(conn)
+                    if row is None or not row[6]:
+                        return None
+                    if not hmac.compare_digest(row[1] or "", submitted_hash):
+                        return None
+                    return {
+                        "key": key_id, "owner_email": row[2], "plan": row[3],
+                        "monthly_limit": row[4], "current_month_count": row[5],
+                        "active": bool(row[6]),
+                    }
+                except Exception as exc:
+                    logger.warning("DB validate_api_key (new format) failed: %s", exc)
+                    return None
+
+            try:
+                with self._sqlite_cursor() as cur:
+                    cur.execute(
+                        "SELECT key_id, key_hash, owner_email, plan, monthly_limit, "
+                        "current_month_count, active "
+                        "FROM api_keys WHERE key_id = ?",
+                        (key_id,),
+                    )
+                    row = cur.fetchone()
+                if row is None or not row["active"]:
+                    return None
+                if not hmac.compare_digest(row["key_hash"] or "", submitted_hash):
+                    return None
+                return {
+                    "key": row["key_id"], "owner_email": row["owner_email"], "plan": row["plan"],
+                    "monthly_limit": row["monthly_limit"], "current_month_count": row["current_month_count"],
+                    "active": bool(row["active"]),
+                }
+            except Exception as exc:
+                logger.warning("SQLite validate_api_key (new format) failed: %s", exc)
+                return None
+
+        # ── Old format (no dot) — backward compat only ──────────────────────
         if self._use_postgres:
             try:
                 conn = self._pg.get_connection()
                 try:
                     cur = conn.cursor()
                     cur.execute(
-                        "SELECT key, owner_email, plan, monthly_limit, current_month_count, active "
+                        "SELECT key, owner_email, plan, monthly_limit, current_month_count, "
+                        "active, key_hash "
                         "FROM api_keys WHERE key = %s",
                         (key,),
                     )
@@ -483,23 +598,30 @@ class DatabaseManager:
                     self._pg.release_connection(conn)
                 if row is None or not row[5]:
                     return None
+                # Block old-style auth for new-format rows (key_hash present)
+                if row[6]:
+                    return None
                 return {
                     "key": row[0], "owner_email": row[1], "plan": row[2],
                     "monthly_limit": row[3], "current_month_count": row[4], "active": bool(row[5]),
                 }
             except Exception as exc:
-                logger.warning("DB validate_api_key failed: %s", exc)
+                logger.warning("DB validate_api_key (old format) failed: %s", exc)
                 return None
 
         try:
             with self._sqlite_cursor() as cur:
                 cur.execute(
-                    "SELECT key, owner_email, plan, monthly_limit, current_month_count, active "
+                    "SELECT key, owner_email, plan, monthly_limit, current_month_count, "
+                    "active, key_hash "
                     "FROM api_keys WHERE key = ?",
                     (key,),
                 )
                 row = cur.fetchone()
             if row is None or not row["active"]:
+                return None
+            # Block old-style auth for new-format rows (key_hash present)
+            if row["key_hash"]:
                 return None
             return {
                 "key": row["key"], "owner_email": row["owner_email"], "plan": row["plan"],
@@ -507,19 +629,26 @@ class DatabaseManager:
                 "active": bool(row["active"]),
             }
         except Exception as exc:
-            logger.warning("SQLite validate_api_key failed: %s", exc)
+            logger.warning("SQLite validate_api_key (old format) failed: %s", exc)
             return None
 
     def increment_usage(self, key: str):
         """Bump current_month_count for the given key."""
+        key_id, _ = _split_key(key)
+        if key_id:
+            pg_col, sq_col, lookup = "key_id", "key_id", key_id
+        else:
+            pg_col, sq_col, lookup = "key", "key", key
+
         if self._use_postgres:
             try:
                 conn = self._pg.get_connection()
                 try:
                     cur = conn.cursor()
                     cur.execute(
-                        "UPDATE api_keys SET current_month_count = current_month_count + 1 WHERE key = %s",
-                        (key,),
+                        f"UPDATE api_keys SET current_month_count = current_month_count + 1 "
+                        f"WHERE {pg_col} = %s",
+                        (lookup,),
                     )
                     conn.commit()
                 finally:
@@ -531,8 +660,9 @@ class DatabaseManager:
         try:
             with self._sqlite_cursor() as cur:
                 cur.execute(
-                    "UPDATE api_keys SET current_month_count = current_month_count + 1 WHERE key = ?",
-                    (key,),
+                    f"UPDATE api_keys SET current_month_count = current_month_count + 1 "
+                    f"WHERE {sq_col} = ?",
+                    (lookup,),
                 )
         except Exception as exc:
             logger.warning("SQLite increment_usage failed: %s", exc)
@@ -543,16 +673,22 @@ class DatabaseManager:
         Returns a dict with current_month_count/monthly_limit/plan on success,
         or None if the quota is exhausted (or the key doesn't exist/is inactive).
         """
+        key_id, _ = _split_key(key)
+        if key_id:
+            pg_col, sq_col, lookup = "key_id", "key_id", key_id
+        else:
+            pg_col, sq_col, lookup = "key", "key", key
+
         if self._use_postgres:
             try:
                 conn = self._pg.get_connection()
                 try:
                     cur = conn.cursor()
                     cur.execute(
-                        "UPDATE api_keys SET current_month_count = current_month_count + 1 "
-                        "WHERE key = %s AND active = true AND current_month_count < monthly_limit "
-                        "RETURNING current_month_count, monthly_limit, plan",
-                        (key,),
+                        f"UPDATE api_keys SET current_month_count = current_month_count + 1 "
+                        f"WHERE {pg_col} = %s AND active = true AND current_month_count < monthly_limit "
+                        f"RETURNING current_month_count, monthly_limit, plan",
+                        (lookup,),
                     )
                     row = cur.fetchone()
                     conn.commit()
@@ -568,10 +704,10 @@ class DatabaseManager:
         try:
             with self._sqlite_cursor() as cur:
                 cur.execute(
-                    "UPDATE api_keys SET current_month_count = current_month_count + 1 "
-                    "WHERE key = ? AND active = 1 AND current_month_count < monthly_limit "
-                    "RETURNING current_month_count, monthly_limit, plan",
-                    (key,),
+                    f"UPDATE api_keys SET current_month_count = current_month_count + 1 "
+                    f"WHERE {sq_col} = ? AND active = 1 AND current_month_count < monthly_limit "
+                    f"RETURNING current_month_count, monthly_limit, plan",
+                    (lookup,),
                 )
                 row = cur.fetchone()
             if row is None:
@@ -588,6 +724,11 @@ class DatabaseManager:
     def get_usage(self, key: str) -> dict:
         """Return usage stats for the given key."""
         empty = {"count": 0, "limit": 1000, "percentage_used": 0.0, "plan": "free"}
+        key_id_part, _ = _split_key(key)
+        if key_id_part:
+            pg_col, sq_col, lookup = "key_id", "key_id", key_id_part
+        else:
+            pg_col, sq_col, lookup = "key", "key", key
 
         if self._use_postgres:
             try:
@@ -595,8 +736,9 @@ class DatabaseManager:
                 try:
                     cur = conn.cursor()
                     cur.execute(
-                        "SELECT current_month_count, monthly_limit, plan FROM api_keys WHERE key = %s",
-                        (key,),
+                        f"SELECT current_month_count, monthly_limit, plan "
+                        f"FROM api_keys WHERE {pg_col} = %s",
+                        (lookup,),
                     )
                     row = cur.fetchone()
                 finally:
@@ -611,8 +753,9 @@ class DatabaseManager:
             try:
                 with self._sqlite_cursor() as cur:
                     cur.execute(
-                        "SELECT current_month_count, monthly_limit, plan FROM api_keys WHERE key = ?",
-                        (key,),
+                        f"SELECT current_month_count, monthly_limit, plan "
+                        f"FROM api_keys WHERE {sq_col} = ?",
+                        (lookup,),
                     )
                     row = cur.fetchone()
                 if row is None:
@@ -635,6 +778,8 @@ class DatabaseManager:
         if not api_key:
             return empty
 
+        # Predictions are stored with key_id, not the full secret key
+        api_key = _key_id_from_full(api_key)
         usage = self.get_usage(api_key)
 
         if self._use_postgres:
@@ -722,6 +867,8 @@ class DatabaseManager:
         """Return recent predictions scoped to the given API key, newest first."""
         if not api_key:
             return []
+        # Predictions are stored with key_id, not the full secret key
+        api_key = _key_id_from_full(api_key)
 
         if self._use_postgres:
             try:

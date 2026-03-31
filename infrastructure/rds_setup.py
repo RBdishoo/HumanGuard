@@ -234,7 +234,9 @@ def add_api_keys_table(database_url: str):
     create_sql = """
     CREATE TABLE IF NOT EXISTS api_keys (
         id                  SERIAL PRIMARY KEY,
-        key                 VARCHAR(50) UNIQUE NOT NULL,
+        key                 VARCHAR(64) UNIQUE NOT NULL,
+        key_id              VARCHAR(16) UNIQUE,
+        key_hash            VARCHAR(64),
         owner_email         VARCHAR(255) NOT NULL,
         plan                VARCHAR(20) NOT NULL DEFAULT 'free',
         monthly_limit       INTEGER NOT NULL DEFAULT 1000,
@@ -242,7 +244,8 @@ def add_api_keys_table(database_url: str):
         created_at          TIMESTAMPTZ DEFAULT NOW(),
         active              BOOLEAN NOT NULL DEFAULT TRUE
     );
-    CREATE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys (key);
+    CREATE INDEX IF NOT EXISTS idx_api_keys_key    ON api_keys (key);
+    CREATE INDEX IF NOT EXISTS idx_api_keys_key_id ON api_keys (key_id);
     """
 
     conn = psycopg2.connect(database_url)
@@ -254,6 +257,35 @@ def add_api_keys_table(database_url: str):
     except Exception as exc:
         conn.rollback()
         print(f"api_keys migration failed: {exc}")
+        raise
+    finally:
+        conn.close()
+
+
+def add_key_hash_columns(database_url: str):
+    """
+    Add key_id and key_hash columns to api_keys for hashed key storage.
+    Safe to run multiple times — uses IF NOT EXISTS guard.
+    """
+    import psycopg2
+
+    migrations = [
+        "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_id   VARCHAR(16) UNIQUE",
+        "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_hash VARCHAR(64)",
+        "CREATE INDEX IF NOT EXISTS idx_api_keys_key_id ON api_keys (key_id)",
+    ]
+
+    conn = psycopg2.connect(database_url)
+    try:
+        cur = conn.cursor()
+        for sql in migrations:
+            cur.execute(sql)
+            print(f"  OK: {sql}")
+        conn.commit()
+        print("key_hash migration complete.")
+    except Exception as exc:
+        conn.rollback()
+        print(f"key_hash migration failed: {exc}")
         raise
     finally:
         conn.close()
@@ -278,6 +310,7 @@ if __name__ == "__main__":
         add_source_label_columns(db_url)
         add_leaderboard_table(db_url)
         add_api_keys_table(db_url)
+        add_key_hash_columns(db_url)
         sys.exit(0)
 
     print(f"=== HumanGuard RDS Setup (region={REGION}) ===\n")

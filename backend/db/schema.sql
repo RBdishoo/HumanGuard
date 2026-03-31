@@ -67,9 +67,14 @@ CREATE TABLE IF NOT EXISTS leaderboard (
 );
 
 -- API keys — multi-tenant scoring access
+-- key     : stores key_id only (non-secret); legacy rows store the raw key
+-- key_id  : non-secret lookup prefix (hg_live_<8-char-id>); NULL for legacy rows
+-- key_hash: SHA-256 of the secret portion; NULL for legacy rows
 CREATE TABLE IF NOT EXISTS api_keys (
     id                  SERIAL PRIMARY KEY,
-    key                 VARCHAR(50) UNIQUE NOT NULL,
+    key                 VARCHAR(64) UNIQUE NOT NULL,
+    key_id              VARCHAR(16) UNIQUE,
+    key_hash            VARCHAR(64),
     owner_email         VARCHAR(255) NOT NULL,
     plan                VARCHAR(20) NOT NULL DEFAULT 'free',
     monthly_limit       INTEGER NOT NULL DEFAULT 1000,
@@ -78,6 +83,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     active              BOOLEAN NOT NULL DEFAULT TRUE
 );
 
-CREATE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys (key);
+CREATE INDEX IF NOT EXISTS idx_api_keys_key    ON api_keys (key);
+CREATE INDEX IF NOT EXISTS idx_api_keys_key_id ON api_keys (key_id);
 
 COMMIT;
