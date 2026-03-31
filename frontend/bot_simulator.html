@@ -385,7 +385,7 @@
       };
 
       try {
-        const resp = await fetch(`${API_BASE}/api/score`, {
+        const resp = await humanguardFetch('/api/score', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),

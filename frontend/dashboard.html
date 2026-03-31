@@ -676,7 +676,7 @@
 
     async function refresh() {
       try {
-        const resp = await fetch(`${API_BASE}/api/dashboard-stats`);
+        const resp = await humanguardFetch('/api/dashboard-stats');
         if (!resp.ok) return;
         const data = await resp.json();
         _lastData = data;
@@ -699,7 +699,7 @@
 
     async function initModel() {
       try {
-        const resp = await fetch(`${API_BASE}/health`);
+        const resp = await humanguardFetch('/health');
         if (!resp.ok) return;
         const data = await resp.json();
         if (data.model) document.getElementById('statModel').textContent = data.model;
@@ -722,7 +722,7 @@
     async function fetchModelInfo() {
       const el = document.getElementById('modelInfoContent');
       try {
-        const resp = await fetch(`${API_BASE}/api/model-info`);
+        const resp = await humanguardFetch('/api/model-info');
         if (!resp.ok) {
           el.innerHTML = '<div class="empty-msg">Model info unavailable.</div>';
           return;

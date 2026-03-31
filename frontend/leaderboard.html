@@ -263,7 +263,7 @@
 
     async function fetchLeaderboard() {
       try {
-        const resp = await fetch(`${API_BASE}/api/leaderboard?limit=50`);
+        const resp = await humanguardFetch('/api/leaderboard?limit=50');
         if (!resp.ok) return;
         const data = await resp.json();
         renderLeaderboard(data);
