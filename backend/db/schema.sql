@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     viewport_height INTEGER,
     source          VARCHAR(100),
     label           VARCHAR(10),
+    trained_at      TIMESTAMPTZ DEFAULT NULL,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -47,10 +48,12 @@ CREATE TABLE IF NOT EXISTS predictions (
     threshold       DOUBLE PRECISION NOT NULL,
     scoring_type    VARCHAR(10) NOT NULL DEFAULT 'batch' CHECK (scoring_type IN ('batch', 'session')),
     source          VARCHAR(100),
+    api_key         VARCHAR(50),
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_predictions_session_id ON predictions (session_id);
+CREATE INDEX IF NOT EXISTS idx_predictions_api_key ON predictions (api_key);
 CREATE INDEX IF NOT EXISTS idx_predictions_created_at ON predictions (created_at);
 
 -- Leaderboard — public challenge entries

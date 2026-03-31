@@ -136,7 +136,7 @@ def save_signal_batch(batch_data):
         release_connection(conn)
 
 
-def save_prediction(session_id, prob_bot, label, threshold, scoring_type="batch", source=None):
+def save_prediction(session_id, prob_bot, label, threshold, scoring_type="batch", source=None, api_key=None):
     """Insert a prediction row, ensuring the session row exists first."""
     conn = get_connection()
     try:
@@ -148,9 +148,9 @@ def save_prediction(session_id, prob_bot, label, threshold, scoring_type="batch"
         )
         cur.execute(
             """INSERT INTO predictions (session_id, prob_bot, label, threshold, scoring_type,
-                                        source)
-               VALUES (%s, %s, %s, %s, %s, %s)""",
-            (session_id, prob_bot, label, threshold, scoring_type, source),
+                                        source, api_key)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            (session_id, prob_bot, label, threshold, scoring_type, source, api_key),
         )
         conn.commit()
     except Exception:

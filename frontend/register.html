@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HumanGuard — Get Your API Key</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    /* ── Nav ── */
+    .navbar {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 32px;
+      height: 48px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .nav-brand {
+      font-size: 13px;
+      font-weight: bold;
+      color: #58a6ff;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      text-decoration: none;
+      flex-shrink: 0;
+    }
+    .nav-links { display: flex; gap: 2px; }
+    .nav-link {
+      padding: 6px 12px;
+      font-size: 12px;
+      color: #8b949e;
+      text-decoration: none;
+      border-radius: 4px;
+      letter-spacing: 0.5px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .nav-link:hover { color: #c9d1d9; background: #21262d; }
+    .nav-link.active { color: #58a6ff; background: #1c2d40; }
+
+    /* ── Page ── */
+    .page {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 48px 24px;
+    }
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      width: 100%;
+      max-width: 520px;
+    }
+
+    /* ── Register form ── */
+    #registerCard { padding: 32px 36px; }
+    .card-title {
+      font-size: 20px;
+      color: #c9d1d9;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+    .card-sub {
+      font-size: 12px;
+      color: #8b949e;
+      line-height: 1.7;
+      margin-bottom: 24px;
+    }
+    label {
+      display: block;
+      font-size: 11px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 6px;
+    }
+    input[type="email"] {
+      width: 100%;
+      padding: 10px 14px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      color: #c9d1d9;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      margin-bottom: 16px;
+      transition: border-color 0.15s;
+    }
+    input[type="email"]:focus { outline: none; border-color: #58a6ff; }
+    input[type="email"].error { border-color: #f85149; }
+    .submit-btn {
+      width: 100%;
+      padding: 11px;
+      background: #1f6feb;
+      border: none;
+      border-radius: 4px;
+      color: #fff;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .submit-btn:hover:not(:disabled) { background: #388bfd; }
+    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .error-msg {
+      font-size: 11px;
+      color: #f85149;
+      margin-top: -10px;
+      margin-bottom: 14px;
+      display: none;
+    }
+
+    /* ── Plan info ── */
+    .plan-info {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid #21262d;
+      display: flex;
+      gap: 20px;
+    }
+    .plan-item { font-size: 11px; color: #8b949e; }
+    .plan-item strong { color: #3fb950; }
+
+    /* ── Success panel ── */
+    #successCard { padding: 32px 36px; display: none; }
+    .success-badge {
+      display: inline-block;
+      background: #1c3d2a;
+      color: #3fb950;
+      font-size: 10px;
+      padding: 3px 10px;
+      border-radius: 3px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+    .key-display {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 14px 16px;
+      position: relative;
+      margin: 12px 0 20px;
+    }
+    .key-display code {
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      color: #58a6ff;
+      word-break: break-all;
+    }
+    .copy-btn {
+      position: absolute;
+      top: 8px; right: 8px;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 3px;
+      color: #8b949e;
+      font-size: 10px;
+      padding: 3px 8px;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      transition: background 0.15s;
+    }
+    .copy-btn:hover { background: #30363d; color: #c9d1d9; }
+    .copy-btn.copied { color: #3fb950; border-color: #3fb950; }
+
+    .section-label {
+      font-size: 10px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+
+    /* ── SDK snippet ── */
+    .snippet-wrap {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 14px 16px;
+      position: relative;
+      margin-bottom: 20px;
+    }
+    .snippet-wrap pre {
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      color: #8b949e;
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.7;
+    }
+    .snippet-copy {
+      position: absolute;
+      top: 8px; right: 8px;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 3px;
+      color: #8b949e;
+      font-size: 10px;
+      padding: 3px 8px;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      transition: background 0.15s;
+    }
+    .snippet-copy:hover { background: #30363d; color: #c9d1d9; }
+    .snippet-copy.copied { color: #3fb950; border-color: #3fb950; }
+
+    /* ── Action links ── */
+    .action-links {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .action-btn {
+      display: inline-block;
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: 'Courier New', monospace;
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+    .action-btn.primary {
+      background: #1f6feb;
+      color: #fff;
+    }
+    .action-btn.primary:hover { background: #388bfd; }
+    .action-btn.secondary {
+      background: #21262d;
+      color: #c9d1d9;
+      border: 1px solid #30363d;
+    }
+    .action-btn.secondary:hover { background: #30363d; }
+
+    .warning-note {
+      font-size: 11px;
+      color: #8b949e;
+      background: #1c1f26;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 10px 14px;
+      line-height: 1.7;
+      margin-bottom: 20px;
+    }
+    .warning-note strong { color: #d29922; }
+  </style>
+</head>
+<body>
+
+  <!-- Nav Bar -->
+  <nav class="navbar">
+    <a href="/" class="nav-brand">HumanGuard</a>
+    <div class="nav-links">
+      <a href="/dashboard" class="nav-link">Dashboard</a>
+      <a href="/demo" class="nav-link">Demo</a>
+      <a href="/leaderboard" class="nav-link">Leaderboard</a>
+      <a href="/client" class="nav-link">My Dashboard</a>
+      <a href="/register" class="nav-link active">Get API Key</a>
+    </div>
+  </nav>
+
+  <div class="page">
+    <div class="card">
+
+      <!-- Registration form -->
+      <div id="registerCard">
+        <div class="card-title">Get Your Free API Key</div>
+        <div class="card-sub">
+          Integrate HumanGuard into your website to detect bots in real time.<br>
+          Free plan includes 1,000 scored sessions per month.
+        </div>
+
+        <label for="emailInput">Work Email</label>
+        <input type="email" id="emailInput" placeholder="you@example.com" autocomplete="email">
+        <div class="error-msg" id="errorMsg">Please enter a valid email address.</div>
+
+        <button class="submit-btn" id="submitBtn" onclick="register()">Get My API Key →</button>
+
+        <div class="plan-info">
+          <div class="plan-item"><strong>1,000</strong><br>sessions/month</div>
+          <div class="plan-item"><strong>Free</strong><br>no credit card</div>
+          <div class="plan-item"><strong>Instant</strong><br>setup</div>
+        </div>
+      </div>
+
+      <!-- Success panel -->
+      <div id="successCard">
+        <div class="success-badge">Key Generated</div>
+        <div class="card-title">You're all set!</div>
+        <div class="card-sub">
+          Your API key has been created. Save it somewhere safe — we won't show it again.
+        </div>
+
+        <div class="warning-note">
+          <strong>Keep this key private.</strong> Anyone with your key can consume your monthly quota.
+          Rotate it by registering a new key if compromised.
+        </div>
+
+        <div class="section-label">Your API Key</div>
+        <div class="key-display">
+          <code id="displayKey">—</code>
+          <button class="copy-btn" id="copyKeyBtn" onclick="copyKey()">Copy</button>
+        </div>
+
+        <div class="section-label">SDK Integration</div>
+        <div class="snippet-wrap">
+          <button class="snippet-copy" id="copySnippetBtn" onclick="copySnippet()">Copy</button>
+          <pre id="sdkSnippet">&lt;!-- Add to your site's &lt;head&gt; --&gt;
+&lt;script src="https://cdn.humanguard.io/sdk.js"
+        data-api-key="YOUR_KEY"&gt;&lt;/script&gt;</pre>
+        </div>
+
+        <div class="action-links">
+          <a href="/client" id="dashboardLink" class="action-btn primary">View My Dashboard →</a>
+          <a href="https://github.com/rubenbetabdishoo/HumanGuard#api"
+             class="action-btn secondary" target="_blank" rel="noopener">API Docs</a>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com';
+
+    function register() {
+      const emailInput = document.getElementById('emailInput');
+      const errorMsg = document.getElementById('errorMsg');
+      const submitBtn = document.getElementById('submitBtn');
+      const email = emailInput.value.trim();
+
+      emailInput.classList.remove('error');
+      errorMsg.style.display = 'none';
+
+      if (!email || !email.includes('@') || !email.includes('.')) {
+        emailInput.classList.add('error');
+        errorMsg.style.display = 'block';
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Generating…';
+
+      fetch(API_BASE + '/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email }),
+      })
+      .then(function(r) {
+        if (!r.ok) return r.json().then(function(d) { throw new Error(d.error || 'Registration failed'); });
+        return r.json();
+      })
+      .then(function(data) {
+        showSuccess(data.api_key, data.monthly_limit || 1000);
+      })
+      .catch(function(err) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Get My API Key →';
+        errorMsg.textContent = err.message || 'Something went wrong. Please try again.';
+        errorMsg.style.display = 'block';
+      });
+    }
+
+    function showSuccess(key, limit) {
+      document.getElementById('registerCard').style.display = 'none';
+      const card = document.getElementById('successCard');
+      card.style.display = 'block';
+
+      document.getElementById('displayKey').textContent = key;
+
+      // SDK snippet with real key
+      document.getElementById('sdkSnippet').textContent =
+        '<script src="https://cdn.humanguard.io/sdk.js"\n' +
+        '        data-api-key="' + key + '"><\/script>';
+
+      // Store key in sessionStorage so client dashboard picks it up
+      sessionStorage.setItem('hg_client_key', key);
+    }
+
+    function copyKey() {
+      const key = document.getElementById('displayKey').textContent;
+      navigator.clipboard.writeText(key).then(function() {
+        const btn = document.getElementById('copyKeyBtn');
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() {
+          btn.textContent = 'Copy';
+          btn.classList.remove('copied');
+        }, 2000);
+      });
+    }
+
+    function copySnippet() {
+      const text = document.getElementById('sdkSnippet').textContent;
+      navigator.clipboard.writeText(text).then(function() {
+        const btn = document.getElementById('copySnippetBtn');
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() {
+          btn.textContent = 'Copy';
+          btn.classList.remove('copied');
+        }, 2000);
+      });
+    }
+
+    document.getElementById('emailInput').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') register();
+    });
+  </script>
+</body>
+</html>

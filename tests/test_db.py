@@ -158,7 +158,7 @@ def test_prediction_saved_after_score_when_db_available():
     assert resp.status_code == 200
     data = json.loads(resp.data)
     assert data["label"] == "bot"
-    mock_save_pred.assert_called_once_with("test-session-1", mock.ANY, "bot", 0.5, source=mock.ANY)
+    mock_save_pred.assert_called_once_with("test-session-1", mock.ANY, "bot", 0.5, source=mock.ANY, api_key=mock.ANY)
 
 
 # -------------------------------------------------------------------

@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HumanGuard — Your Bot Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    /* ── Nav ── */
+    .navbar {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 32px;
+      height: 48px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .nav-brand {
+      font-size: 13px;
+      font-weight: bold;
+      color: #58a6ff;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      text-decoration: none;
+      flex-shrink: 0;
+    }
+    .nav-links { display: flex; gap: 2px; }
+    .nav-link {
+      padding: 6px 12px;
+      font-size: 12px;
+      color: #8b949e;
+      text-decoration: none;
+      border-radius: 4px;
+      letter-spacing: 0.5px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .nav-link:hover { color: #c9d1d9; background: #21262d; }
+    .nav-link.active { color: #58a6ff; background: #1c2d40; }
+
+    /* ── Page ── */
+    .page { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
+
+    /* ── Key input overlay ── */
+    #keyOverlay {
+      position: fixed; inset: 0;
+      background: rgba(13,17,23,0.97);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 200;
+    }
+    .key-box {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 32px 40px;
+      width: 420px;
+      text-align: center;
+    }
+    .key-box h2 { font-size: 16px; color: #c9d1d9; margin-bottom: 8px; }
+    .key-box p { font-size: 12px; color: #8b949e; margin-bottom: 20px; line-height: 1.6; }
+    .key-box input {
+      width: 100%;
+      padding: 10px 14px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      color: #c9d1d9;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      margin-bottom: 12px;
+    }
+    .key-box input:focus { outline: none; border-color: #58a6ff; }
+    .key-box button {
+      width: 100%;
+      padding: 10px;
+      background: #1f6feb;
+      border: none;
+      border-radius: 4px;
+      color: #fff;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .key-box button:hover { background: #388bfd; }
+    .key-box .reg-link { margin-top: 12px; font-size: 11px; color: #8b949e; }
+    .key-box .reg-link a { color: #58a6ff; text-decoration: none; }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 20px;
+    }
+    .header-title { font-size: 18px; color: #c9d1d9; letter-spacing: 1px; }
+    .header-sub { font-size: 11px; color: #484f58; margin-top: 5px; }
+    .api-key-badge {
+      font-size: 11px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 6px 12px;
+      color: #8b949e;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .api-key-badge:hover { border-color: #58a6ff; color: #c9d1d9; }
+
+    /* ── Stats Bar ── */
+    .stats-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .stat-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 16px 18px;
+    }
+    .stat-card .card-label {
+      font-size: 10px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+    }
+    .stat-card .card-value {
+      font-size: 28px;
+      font-weight: bold;
+      color: #c9d1d9;
+      line-height: 1;
+    }
+    .stat-card .card-value.red   { color: #f85149; }
+    .stat-card .card-value.blue  { color: #58a6ff; }
+    .stat-card .card-value.green { color: #3fb950; }
+    .stat-card .card-value.small { font-size: 18px; }
+
+    /* ── Main grid ── */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    /* ── Section card ── */
+    .section {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 16px;
+    }
+    .section h2 {
+      font-size: 10px;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 6px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #21262d;
+    }
+
+    /* ── Chart ── */
+    canvas { display: block; }
+    .canvas-wrap { position: relative; margin-top: 12px; }
+
+    /* ── Sessions table ── */
+    .sessions-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
+    .sessions-table th {
+      text-align: left;
+      font-size: 10px;
+      color: #484f58;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 0 0 8px;
+      border-bottom: 1px solid #21262d;
+    }
+    .sessions-table td {
+      padding: 7px 0;
+      border-bottom: 1px solid #21262d;
+      color: #8b949e;
+    }
+    .sessions-table tr:last-child td { border-bottom: none; }
+    .sessions-table td.session-id {
+      font-family: 'Courier New', monospace;
+      color: #8b949e;
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sessions-table td.score { color: #c9d1d9; }
+
+    .badge {
+      font-size: 9px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      font-weight: bold;
+    }
+    .badge.bot   { background: #3d1c1c; color: #f85149; }
+    .badge.human { background: #1c3d2a; color: #3fb950; }
+
+    /* ── Usage meter ── */
+    .usage-section { margin-bottom: 16px; }
+    .usage-bar-wrap {
+      background: #21262d;
+      border-radius: 4px;
+      height: 10px;
+      margin: 12px 0 8px;
+      overflow: hidden;
+    }
+    .usage-bar {
+      height: 100%;
+      background: #1f6feb;
+      border-radius: 4px;
+      transition: width 0.5s ease;
+    }
+    .usage-bar.warn { background: #d29922; }
+    .usage-bar.danger { background: #f85149; }
+    .usage-meta { display: flex; justify-content: space-between; font-size: 11px; color: #8b949e; }
+
+    /* ── SDK snippet ── */
+    .sdk-section { margin-bottom: 16px; }
+    .snippet-wrap {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 14px 16px;
+      position: relative;
+      margin-top: 12px;
+    }
+    .snippet-wrap pre {
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      color: #8b949e;
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.7;
+    }
+    .copy-btn {
+      position: absolute;
+      top: 8px; right: 8px;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 3px;
+      color: #8b949e;
+      font-size: 10px;
+      padding: 3px 8px;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      transition: background 0.15s;
+    }
+    .copy-btn:hover { background: #30363d; color: #c9d1d9; }
+    .copy-btn.copied { color: #3fb950; border-color: #3fb950; }
+
+    /* ── Empty state ── */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: #484f58;
+    }
+    .empty-state .empty-icon { font-size: 32px; margin-bottom: 12px; }
+    .empty-state h3 { font-size: 14px; color: #8b949e; margin-bottom: 8px; }
+    .empty-state p { font-size: 12px; line-height: 1.7; }
+
+    /* ── Full-width section ── */
+    .full-section { margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+
+  <!-- Key entry overlay — shown when no key in sessionStorage -->
+  <div id="keyOverlay">
+    <div class="key-box">
+      <h2>Enter Your API Key</h2>
+      <p>Paste your <code>hg_live_*</code> API key to view your bot traffic dashboard.</p>
+      <input id="keyInput" type="text" placeholder="hg_live_..." autocomplete="off" spellcheck="false">
+      <button id="keySubmit">View My Dashboard</button>
+      <div class="reg-link">Don't have a key? <a href="/register">Get one free →</a></div>
+    </div>
+  </div>
+
+  <!-- Nav Bar -->
+  <nav class="navbar">
+    <a href="/" class="nav-brand">HumanGuard</a>
+    <div class="nav-links">
+      <a href="/dashboard" class="nav-link">Dashboard</a>
+      <a href="/demo" class="nav-link">Demo</a>
+      <a href="/leaderboard" class="nav-link">Leaderboard</a>
+      <a href="/client" class="nav-link active">My Dashboard</a>
+      <a href="/register" class="nav-link">Get API Key</a>
+    </div>
+  </nav>
+
+  <div class="page">
+
+    <!-- Header -->
+    <div class="header">
+      <div>
+        <div class="header-title">HumanGuard — Your Bot Dashboard</div>
+        <div class="header-sub" id="headerSub">Loading...</div>
+      </div>
+      <div id="apiKeyBadge" class="api-key-badge" title="Click to change API key" onclick="changeKey()">—</div>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="stats-bar">
+      <div class="stat-card">
+        <div class="card-label">Total Sessions</div>
+        <div class="card-value blue" id="statTotal">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="card-label">Bot Rate</div>
+        <div class="card-value red" id="statBotRate">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="card-label">Sessions Today</div>
+        <div class="card-value" id="statToday">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="card-label">API Usage</div>
+        <div class="card-value small" id="statUsage">—</div>
+      </div>
+    </div>
+
+    <!-- Main Grid: Chart + Table -->
+    <div class="main-grid">
+
+      <!-- Bot Rate Chart -->
+      <div class="section">
+        <h2>Bot Rate — Last 7 Days</h2>
+        <div class="canvas-wrap">
+          <canvas id="rateChart" height="180"></canvas>
+        </div>
+      </div>
+
+      <!-- Recent Sessions -->
+      <div class="section">
+        <h2>Recent Sessions</h2>
+        <div id="tableWrap">
+          <table class="sessions-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Session ID</th>
+                <th>Score</th>
+                <th>Verdict</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody id="sessionsBody">
+            </tbody>
+          </table>
+        </div>
+        <div id="tableEmpty" class="empty-state" style="display:none">
+          <div class="empty-icon">📭</div>
+          <h3>No sessions yet</h3>
+          <p>Integrate the SDK to start tracking bot traffic on your site.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Usage Meter -->
+    <div class="section usage-section">
+      <h2>Monthly API Usage</h2>
+      <div class="usage-bar-wrap">
+        <div class="usage-bar" id="usageBar" style="width:0%"></div>
+      </div>
+      <div class="usage-meta">
+        <span id="usageLeft">— requests used</span>
+        <span id="usageRight">— remaining</span>
+      </div>
+    </div>
+
+    <!-- SDK Integration Snippet -->
+    <div class="section sdk-section">
+      <h2>SDK Integration</h2>
+      <div class="snippet-wrap">
+        <button class="copy-btn" id="copyBtn" onclick="copySnippet()">Copy</button>
+        <pre id="sdkSnippet">&lt;!-- Add to your site's &lt;head&gt; --&gt;
+&lt;script src="https://cdn.humanguard.io/sdk.js"
+        data-api-key="YOUR_KEY"&gt;&lt;/script&gt;</pre>
+      </div>
+    </div>
+
+  </div><!-- .page -->
+
+  <script>
+    const API_BASE = 'https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com';
+    const KEY_STORAGE = 'hg_client_key';
+
+    // ── Key management ─────────────────────────────────────────────────────────
+
+    function maskKey(k) {
+      if (!k || k.length < 8) return k;
+      return k.slice(0, 8) + '****' + k.slice(-4);
+    }
+
+    function getStoredKey() {
+      return sessionStorage.getItem(KEY_STORAGE) || '';
+    }
+
+    function saveKey(k) {
+      sessionStorage.setItem(KEY_STORAGE, k);
+    }
+
+    function changeKey() {
+      sessionStorage.removeItem(KEY_STORAGE);
+      location.reload();
+    }
+
+    document.getElementById('keySubmit').addEventListener('click', function() {
+      const val = document.getElementById('keyInput').value.trim();
+      if (!val.startsWith('hg_')) {
+        document.getElementById('keyInput').style.borderColor = '#f85149';
+        return;
+      }
+      saveKey(val);
+      document.getElementById('keyOverlay').style.display = 'none';
+      initDashboard(val);
+    });
+
+    document.getElementById('keyInput').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') document.getElementById('keySubmit').click();
+    });
+
+    // ── Init ───────────────────────────────────────────────────────────────────
+
+    function initDashboard(key) {
+      document.getElementById('apiKeyBadge').textContent = maskKey(key);
+      document.getElementById('headerSub').textContent = 'Live bot traffic for ' + maskKey(key);
+
+      // Update SDK snippet
+      document.getElementById('sdkSnippet').textContent =
+        '<script src="https://cdn.humanguard.io/sdk.js"\n' +
+        '        data-api-key="' + key + '"><\/script>';
+
+      loadStats(key);
+      loadPredictions(key);
+    }
+
+    // ── Fetch helpers ──────────────────────────────────────────────────────────
+
+    function apiFetch(path, key) {
+      return fetch(API_BASE + path, {
+        headers: { 'X-Api-Key': key }
+      }).then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      });
+    }
+
+    // ── Stats ──────────────────────────────────────────────────────────────────
+
+    function loadStats(key) {
+      apiFetch('/api/client/stats', key).then(function(data) {
+        document.getElementById('statTotal').textContent = data.total_sessions;
+        document.getElementById('statBotRate').textContent =
+          (data.bot_rate * 100).toFixed(1) + '%';
+        document.getElementById('statToday').textContent = data.sessions_today;
+        document.getElementById('statUsage').textContent =
+          data.usage_count + '/' + data.usage_limit;
+
+        // Usage bar
+        const pct = data.usage_limit > 0 ? (data.usage_count / data.usage_limit * 100) : 0;
+        const bar = document.getElementById('usageBar');
+        bar.style.width = Math.min(pct, 100) + '%';
+        if (pct >= 90) bar.classList.add('danger');
+        else if (pct >= 70) bar.classList.add('warn');
+        document.getElementById('usageLeft').textContent =
+          data.usage_count + ' requests used this month';
+        document.getElementById('usageRight').textContent =
+          Math.max(0, data.usage_limit - data.usage_count) + ' remaining';
+
+        // Chart
+        renderChart(data.daily_stats || []);
+
+      }).catch(function(err) {
+        console.error('Stats load failed:', err);
+        document.getElementById('headerSub').textContent = 'Failed to load — check your API key';
+      });
+    }
+
+    // ── Chart ──────────────────────────────────────────────────────────────────
+
+    function renderChart(dailyStats) {
+      const canvas = document.getElementById('rateChart');
+      const W = canvas.parentElement.clientWidth || 400;
+      canvas.width = W;
+      const H = canvas.height || 180;
+      const ctx = canvas.getContext('2d');
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#161b22';
+      ctx.fillRect(0, 0, W, H);
+
+      // Build a full 7-day array
+      const days = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        days.push(d.toISOString().slice(0, 10));
+      }
+
+      const statMap = {};
+      (dailyStats || []).forEach(function(s) { statMap[s.date] = s; });
+
+      const values = days.map(function(d) {
+        return statMap[d] ? statMap[d].bot_rate : null;
+      });
+
+      const hasData = values.some(function(v) { return v !== null; });
+
+      const PAD = { top: 16, right: 16, bottom: 30, left: 36 };
+      const cW = W - PAD.left - PAD.right;
+      const cH = H - PAD.top - PAD.bottom;
+
+      // Grid lines
+      ctx.font = '10px Courier New';
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#484f58';
+      [0, 0.25, 0.5, 0.75, 1.0].forEach(function(v) {
+        const y = PAD.top + cH - v * cH;
+        ctx.fillStyle = '#484f58';
+        ctx.fillText((v * 100).toFixed(0) + '%', PAD.left - 6, y + 3);
+        ctx.strokeStyle = '#21262d';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(PAD.left, y);
+        ctx.lineTo(PAD.left + cW, y);
+        ctx.stroke();
+      });
+
+      // X-axis labels
+      ctx.fillStyle = '#484f58';
+      ctx.textAlign = 'center';
+      days.forEach(function(d, i) {
+        const x = PAD.left + i * (cW / 6);
+        const label = d.slice(5); // MM-DD
+        ctx.fillText(label, x, H - 6);
+      });
+
+      if (!hasData) {
+        ctx.fillStyle = '#484f58';
+        ctx.textAlign = 'center';
+        ctx.fillText('No data yet', PAD.left + cW / 2, PAD.top + cH / 2);
+        return;
+      }
+
+      // Fill area
+      ctx.beginPath();
+      let started = false;
+      values.forEach(function(v, i) {
+        const x = PAD.left + i * (cW / 6);
+        if (v === null) { started = false; return; }
+        const y = PAD.top + cH - v * cH;
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else ctx.lineTo(x, y);
+      });
+      // Close fill path
+      const lastI = values.reduceRight(function(acc, v, i) { return acc === -1 && v !== null ? i : acc; }, -1);
+      const firstI = values.findIndex(function(v) { return v !== null; });
+      if (lastI >= 0 && firstI >= 0) {
+        ctx.lineTo(PAD.left + lastI * (cW / 6), PAD.top + cH);
+        ctx.lineTo(PAD.left + firstI * (cW / 6), PAD.top + cH);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(248,81,73,0.1)';
+        ctx.fill();
+      }
+
+      // Line
+      ctx.beginPath();
+      started = false;
+      values.forEach(function(v, i) {
+        const x = PAD.left + i * (cW / 6);
+        if (v === null) { started = false; return; }
+        const y = PAD.top + cH - v * cH;
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = '#f85149';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Dots
+      values.forEach(function(v, i) {
+        if (v === null) return;
+        const x = PAD.left + i * (cW / 6);
+        const y = PAD.top + cH - v * cH;
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#f85149';
+        ctx.fill();
+      });
+    }
+
+    // ── Predictions table ──────────────────────────────────────────────────────
+
+    function loadPredictions(key) {
+      apiFetch('/api/client/predictions?limit=50', key).then(function(rows) {
+        const tbody = document.getElementById('sessionsBody');
+        const empty = document.getElementById('tableEmpty');
+        const tableWrap = document.getElementById('tableWrap');
+
+        if (!rows || rows.length === 0) {
+          tableWrap.style.display = 'none';
+          empty.style.display = 'block';
+          return;
+        }
+
+        tbody.innerHTML = '';
+        rows.forEach(function(r) {
+          const ts = r.created_at ? new Date(r.created_at).toLocaleTimeString() : '—';
+          const sid = (r.session_id || '—').slice(0, 16) + '…';
+          const score = typeof r.prob_bot === 'number' ? (r.prob_bot * 100).toFixed(1) + '%' : '—';
+          const verdict = r.label || '—';
+          const src = r.source || '—';
+
+          const tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td>' + ts + '</td>' +
+            '<td class="session-id">' + escHtml(sid) + '</td>' +
+            '<td class="score">' + score + '</td>' +
+            '<td><span class="badge ' + escHtml(verdict) + '">' + escHtml(verdict) + '</span></td>' +
+            '<td>' + escHtml(src) + '</td>';
+          tbody.appendChild(tr);
+        });
+      }).catch(function(err) {
+        console.error('Predictions load failed:', err);
+      });
+    }
+
+    function escHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // ── Copy snippet ───────────────────────────────────────────────────────────
+
+    function copySnippet() {
+      const text = document.getElementById('sdkSnippet').textContent;
+      navigator.clipboard.writeText(text).then(function() {
+        const btn = document.getElementById('copyBtn');
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() {
+          btn.textContent = 'Copy';
+          btn.classList.remove('copied');
+        }, 2000);
+      });
+    }
+
+    // ── Bootstrap ─────────────────────────────────────────────────────────────
+
+    (function() {
+      const stored = getStoredKey();
+      if (stored) {
+        document.getElementById('keyOverlay').style.display = 'none';
+        initDashboard(stored);
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -387,8 +387,9 @@ def scoreSignals():
             from db.db_client import is_available as db_available, save_prediction
             if db_available():
                 _pred_source = payload_source or getattr(g, "api_key", None)
+                _caller_key = getattr(g, "api_key", None)
                 save_prediction(data.get("sessionID"), prob_bot, label, float(bundle["threshold"]),
-                                source=_pred_source)
+                                source=_pred_source, api_key=_caller_key)
         except Exception as exc:
             logger.warning("Failed to save prediction to PostgreSQL: %s", exc)
 
@@ -602,7 +603,9 @@ def _session_score_logic(session_id):
         try:
             from db.db_client import is_available as db_available, save_prediction
             if db_available():
-                save_prediction(session_id, session_prob_bot, label, threshold, scoring_type="session")
+                _caller_key = getattr(g, "api_key", None)
+                save_prediction(session_id, session_prob_bot, label, threshold,
+                                scoring_type="session", api_key=_caller_key)
         except Exception as exc:
             logger.warning("Failed to save session prediction to PostgreSQL: %s", exc)
 
@@ -1206,6 +1209,47 @@ def getUsage():
     api_key = getattr(g, "api_key", "")
     usage = db_manager.get_usage(api_key)
     return jsonify(usage), 200
+
+
+@app.route('/api/client/stats', methods=['GET'])
+@require_api_key(count_usage=False)
+def clientStats():
+    """
+    GET /api/client/stats
+    Returns prediction stats scoped to the calling API key.
+    """
+    api_key = getattr(g, "api_key", "")
+    stats = db_manager.get_client_stats(api_key)
+    return jsonify(stats), 200
+
+
+@app.route('/api/client/predictions', methods=['GET'])
+@require_api_key(count_usage=False)
+def clientPredictions():
+    """
+    GET /api/client/predictions
+    Returns recent predictions scoped to the calling API key.
+    """
+    api_key = getattr(g, "api_key", "")
+    limit = min(int(request.args.get("limit", 50)), 200)
+    predictions = db_manager.get_client_predictions(api_key, limit=limit)
+    # Serialize datetime objects
+    for p in predictions:
+        if hasattr(p.get("created_at"), "isoformat"):
+            p["created_at"] = p["created_at"].isoformat()
+    return jsonify(predictions), 200
+
+
+@app.route('/client', methods=['GET'])
+def clientDashboard():
+    """GET /client — Serves the client-facing bot monitoring dashboard."""
+    return send_from_directory('../frontend', 'client_dashboard.html')
+
+
+@app.route('/register', methods=['GET'])
+def registerPage():
+    """GET /register — Serves the API key registration page."""
+    return send_from_directory('../frontend', 'register.html')
 
 
 if IS_LAMBDA:
