@@ -49,6 +49,7 @@ SIGNALS_JSONL  = REPO_ROOT / "backend" / "data" / "raw" / "signals.jsonl"
 LABELS_CSV     = REPO_ROOT / "backend" / "data" / "raw" / "labels.csv"
 FEATURES_CSV   = REPO_ROOT / "backend" / "data" / "processed" / "training_data_batches.csv"
 TRAINED_DIR    = REPO_ROOT / "models" / "trained"
+RETRAIN_LOG    = REPO_ROOT / "backend" / "data" / "retrain_log.jsonl"
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -178,6 +179,22 @@ def print_comparison(new_metrics: dict, champion_metrics: dict):
     print()
 
 
+def save_retrain_log(old_auc, new_auc, promoted, session_count, trigger):
+    """Append one JSON line to the retrain log file."""
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "old_auc": round(float(old_auc), 6) if old_auc is not None else None,
+        "new_auc": round(float(new_auc), 6) if new_auc is not None else None,
+        "promoted": bool(promoted),
+        "session_count": int(session_count),
+        "trigger": trigger,
+    }
+    RETRAIN_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(RETRAIN_LOG, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+    logger.info("Retrain log saved to %s", RETRAIN_LOG)
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -192,7 +209,36 @@ def main():
                         help="Push to ModelRegistry and promote if accuracy >= current champion")
     parser.add_argument("--min-accuracy", type=float, default=0.0,
                         help="Minimum accuracy improvement threshold for auto-promote (default: 0.0)")
+    parser.add_argument("--check-threshold", action="store_true",
+                        help="Check if retrain threshold is met. Exits 0 if not met, 1 if met.")
+    parser.add_argument("--auto", action="store_true",
+                        help="Run full retrain only if threshold is met; saves retrain log.")
     args = parser.parse_args()
+
+    # ── --check-threshold: query DB and exit with appropriate code ──────────────
+    if args.check_threshold:
+        from backend.db import db as db_manager
+        from backend.db import RETRAIN_THRESHOLD
+        count = db_manager.get_unlabeled_session_count()
+        if count >= RETRAIN_THRESHOLD:
+            logger.info("Threshold met: %d/%d unlabeled sessions", count, RETRAIN_THRESHOLD)
+            sys.exit(1)  # exit 1 = retrain needed
+        else:
+            logger.info("Threshold not met: %d/%d unlabeled sessions", count, RETRAIN_THRESHOLD)
+            sys.exit(0)  # exit 0 = no action needed
+
+    # ── --auto: check threshold first, skip if not met ─────────────────────────
+    auto_session_count = 0
+    if args.auto:
+        from backend.db import db as db_manager
+        from backend.db import RETRAIN_THRESHOLD
+        auto_session_count = db_manager.get_unlabeled_session_count()
+        if auto_session_count < RETRAIN_THRESHOLD:
+            logger.info(
+                "Auto retrain skipped: only %d/%d unlabeled sessions (need %d)",
+                auto_session_count, RETRAIN_THRESHOLD, RETRAIN_THRESHOLD,
+            )
+            sys.exit(0)
 
     logger.info("=== HumanGuard Retrain Pipeline ===")
 
@@ -297,6 +343,25 @@ def main():
             print(f"  Accuracy {new_acc:.4f} did not exceed champion {champ_acc:.4f}")
     else:
         print("(Dry run — use --push to push to registry)")
+
+    # 7. Post-retrain: mark trained sessions + save log (--auto only)
+    if args.auto:
+        # Mark the new labeled sessions as trained so they won't re-trigger
+        try:
+            from backend.db import db as db_manager
+            if new_labels is not None and not new_labels.empty:
+                db_manager.mark_sessions_as_trained(list(new_labels["sessionID"]))
+                logger.info("Marked %d sessions as trained", len(new_labels))
+        except Exception as exc:
+            logger.warning("Could not mark sessions as trained: %s", exc)
+
+        save_retrain_log(
+            old_auc=champion_metrics.get("roc_auc"),
+            new_auc=new_metrics.get("roc_auc"),
+            promoted=should_promote,
+            session_count=auto_session_count,
+            trigger="auto",
+        )
 
 
 if __name__ == "__main__":

@@ -1178,6 +1178,77 @@ def exportSessions():
     )
 
 
+@app.route('/api/retrain-status', methods=['GET'])
+@require_api_key(count_usage=False)
+def retrainStatus():
+    """
+    GET /api/retrain-status
+    Returns the current state of the automated retraining pipeline:
+      - last_retrain           : ISO timestamp of last successful retrain (or null)
+      - sessions_since_retrain : unlabeled demo/simulator sessions accumulated
+      - threshold              : RETRAIN_THRESHOLD (50)
+      - next_check             : approximate ISO timestamp of next EventBridge check
+      - champion_version       : current model version string
+    """
+    from datetime import timedelta, timezone as _tz
+    try:
+        from db import RETRAIN_THRESHOLD
+    except ImportError:
+        RETRAIN_THRESHOLD = 50
+
+    # ── Last retrain from log file ─────────────────────────────────────────────
+    retrain_log_path = (
+        Path("/tmp/retrain_log.jsonl") if IS_LAMBDA
+        else Path(__file__).resolve().parent / "data" / "retrain_log.jsonl"
+    )
+    last_retrain = None
+    if retrain_log_path.exists():
+        try:
+            with open(retrain_log_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            entry = json.loads(line)
+                            ts = entry.get("timestamp")
+                            if ts and (last_retrain is None or ts > last_retrain):
+                                last_retrain = ts
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+    # ── Sessions since last retrain ────────────────────────────────────────────
+    try:
+        sessions_since_retrain = db_manager.get_unlabeled_session_count()
+    except Exception:
+        sessions_since_retrain = 0
+
+    # ── Next EventBridge check (every 6 hours on 6h boundaries) ───────────────
+    now = datetime.now(_tz.utc)
+    hours_to_next = 6 - (now.hour % 6)
+    next_check = (
+        now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=hours_to_next)
+    ).isoformat()
+
+    # ── Champion version ───────────────────────────────────────────────────────
+    champion_version = "unknown"
+    try:
+        bundle = _load_scoring_bundle()
+        champion_version = bundle.get("_registry_version") or "local"
+    except Exception:
+        if (MODEL_DIR / "model_comparison.json").exists():
+            champion_version = "local"
+
+    return jsonify({
+        "last_retrain": last_retrain,
+        "sessions_since_retrain": sessions_since_retrain,
+        "threshold": RETRAIN_THRESHOLD,
+        "next_check": next_check,
+        "champion_version": champion_version,
+    }), 200
+
+
 @app.route('/api/register', methods=['POST'])
 def registerApiKey():
     """

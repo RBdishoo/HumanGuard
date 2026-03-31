@@ -164,14 +164,15 @@ def store_secret(instance: dict):
 
 def add_source_label_columns(database_url: str):
     """
-    Add source and label columns to sessions and predictions tables if not present.
+    Add source, label, and trained_at columns to sessions and predictions tables if not present.
     Safe to run multiple times — uses IF NOT EXISTS guard.
     """
     import psycopg2
 
     migrations = [
-        "ALTER TABLE sessions    ADD COLUMN IF NOT EXISTS source VARCHAR(100)",
-        "ALTER TABLE sessions    ADD COLUMN IF NOT EXISTS label  VARCHAR(10)",
+        "ALTER TABLE sessions    ADD COLUMN IF NOT EXISTS source     VARCHAR(100)",
+        "ALTER TABLE sessions    ADD COLUMN IF NOT EXISTS label      VARCHAR(10)",
+        "ALTER TABLE sessions    ADD COLUMN IF NOT EXISTS trained_at TIMESTAMPTZ DEFAULT NULL",
         "ALTER TABLE predictions ADD COLUMN IF NOT EXISTS source VARCHAR(100)",
     ]
 
