@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Verify Email — HumanGuard</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 48px 40px;
+    max-width: 480px;
+    width: 100%;
+    text-align: center;
+  }
+
+  .logo {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    margin-bottom: 32px;
+  }
+  .logo span { color: #3fb950; }
+
+  .icon {
+    font-size: 56px;
+    line-height: 1;
+    margin-bottom: 20px;
+  }
+
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+
+  p {
+    color: #8b949e;
+    font-size: 14px;
+    line-height: 1.6;
+    margin-bottom: 28px;
+  }
+
+  .btn {
+    display: inline-block;
+    background: #238636;
+    color: #fff;
+    text-decoration: none;
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    transition: background 0.15s;
+  }
+  .btn:hover { background: #2ea043; }
+
+  .spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #30363d;
+    border-top-color: #3fb950;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 20px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .state { display: none; }
+  .state.active { display: block; }
+
+  .success h1 { color: #3fb950; }
+  .error h1   { color: #f85149; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="logo">Human<span>Guard</span></div>
+
+  <!-- Loading state -->
+  <div class="state active" id="stateLoading">
+    <div class="spinner"></div>
+    <h1>Verifying your email&hellip;</h1>
+    <p>Please wait a moment.</p>
+  </div>
+
+  <!-- Success state -->
+  <div class="state success" id="stateSuccess">
+    <div class="icon">✅</div>
+    <h1>Email verified!</h1>
+    <p>Your API key is now active. You can start making requests immediately.</p>
+    <a class="btn" href="/dashboard">Go to Dashboard</a>
+  </div>
+
+  <!-- Error state -->
+  <div class="state error" id="stateError">
+    <div class="icon">❌</div>
+    <h1>Verification failed</h1>
+    <p id="errorMsg">Invalid or expired token. Please request a new verification email.</p>
+    <a class="btn" href="/" style="background:#21262d;border:1px solid #30363d;">Back to Home</a>
+  </div>
+</div>
+
+<script>
+  (function () {
+    const params = new URLSearchParams(window.location.search);
+    const token  = params.get('token') || '';
+    const id     = params.get('id')    || '';
+
+    if (!token) {
+      show('error', 'No verification token found. Please use the link from your email.');
+      return;
+    }
+
+    const url = '/api/verify?token=' + encodeURIComponent(token)
+              + (id ? '&id=' + encodeURIComponent(id) : '');
+
+    fetch(url)
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) {
+          show('success');
+        } else {
+          show('error', data.error || 'Verification failed.');
+        }
+      })
+      .catch(() => {
+        show('error', 'Network error — please try again or contact support.');
+      });
+
+    function show(state, errorText) {
+      document.getElementById('stateLoading').classList.remove('active');
+      if (state === 'success') {
+        document.getElementById('stateSuccess').classList.add('active');
+      } else {
+        if (errorText) document.getElementById('errorMsg').textContent = errorText;
+        document.getElementById('stateError').classList.add('active');
+      }
+    }
+  }());
+</script>
+</body>
+</html>

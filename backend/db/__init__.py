@@ -20,6 +20,7 @@ import os
 import secrets
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -108,7 +109,22 @@ CREATE TABLE IF NOT EXISTS api_keys (
     monthly_limit       INTEGER NOT NULL DEFAULT 1000,
     current_month_count INTEGER NOT NULL DEFAULT 0,
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    active              INTEGER NOT NULL DEFAULT 1
+    active              INTEGER NOT NULL DEFAULT 1,
+    verified            INTEGER NOT NULL DEFAULT 0,
+    verification_token  TEXT,
+    token_expires_at    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS webhooks (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    api_key_id        TEXT NOT NULL,
+    url               TEXT NOT NULL,
+    secret            TEXT NOT NULL,
+    events            TEXT NOT NULL DEFAULT 'bot_detected',
+    active            INTEGER NOT NULL DEFAULT 1,
+    created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_triggered_at TIMESTAMP,
+    failure_count     INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -182,6 +198,21 @@ class DatabaseManager:
             ),
             "ALTER TABLE api_keys ADD COLUMN key_id TEXT UNIQUE",
             "ALTER TABLE api_keys ADD COLUMN key_hash TEXT",
+            "ALTER TABLE api_keys ADD COLUMN verified INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE api_keys ADD COLUMN verification_token TEXT",
+            "ALTER TABLE api_keys ADD COLUMN token_expires_at TEXT",
+            (
+                "CREATE TABLE IF NOT EXISTS webhooks ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "api_key_id TEXT NOT NULL, "
+                "url TEXT NOT NULL, "
+                "secret TEXT NOT NULL, "
+                "events TEXT NOT NULL DEFAULT 'bot_detected', "
+                "active INTEGER NOT NULL DEFAULT 1, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                "last_triggered_at TIMESTAMP, "
+                "failure_count INTEGER NOT NULL DEFAULT 0)"
+            ),
         ]:
             try:
                 conn.execute(migration_sql)
@@ -478,6 +509,9 @@ class DatabaseManager:
         - id part  stored in key_id and key columns (non-secret, used for lookup)
         - secret part hashed with SHA-256, stored in key_hash (raw secret never stored)
         The full key is returned to the caller exactly once and is not retrievable later.
+
+        A verification token is generated and stored alongside the key.
+        The key starts as unverified (verified=0) with a 24-hour token expiry.
         """
         key_id_part = secrets.token_hex(4)   # 8 hex chars
         secret_part = secrets.token_hex(16)  # 32 hex chars
@@ -485,15 +519,23 @@ class DatabaseManager:
         key_id = f"hg_live_{key_id_part}"
         key_hash = _hash_secret(secret_part)
 
+        verification_token = secrets.token_hex(32)  # 64 hex chars
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(hours=24)
+        ).isoformat()
+
         if self._use_postgres:
             try:
                 conn = self._pg.get_connection()
                 try:
                     cur = conn.cursor()
                     cur.execute(
-                        "INSERT INTO api_keys (key, key_id, key_hash, owner_email, plan, monthly_limit) "
-                        "VALUES (%s, %s, %s, %s, %s, %s)",
-                        (key_id, key_id, key_hash, email, plan, monthly_limit),
+                        "INSERT INTO api_keys "
+                        "(key, key_id, key_hash, owner_email, plan, monthly_limit, "
+                        " verified, verification_token, token_expires_at) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        (key_id, key_id, key_hash, email, plan, monthly_limit,
+                         False, verification_token, expires_at),
                     )
                     conn.commit()
                 finally:
@@ -505,13 +547,105 @@ class DatabaseManager:
         try:
             with self._sqlite_cursor() as cur:
                 cur.execute(
-                    "INSERT INTO api_keys (key, key_id, key_hash, owner_email, plan, monthly_limit) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (key_id, key_id, key_hash, email, plan, monthly_limit),
+                    "INSERT INTO api_keys "
+                    "(key, key_id, key_hash, owner_email, plan, monthly_limit, "
+                    " verified, verification_token, token_expires_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (key_id, key_id, key_hash, email, plan, monthly_limit,
+                     0, verification_token, expires_at),
                 )
         except Exception as exc:
             logger.warning("SQLite generate_api_key failed: %s", exc)
         return full_key
+
+    def get_verification_token(self, full_key: str) -> str | None:
+        """Return the pending verification token for an unverified key, or None.
+
+        Returns None if the key does not exist, is already verified, or the
+        token has expired.
+        """
+        key_id, _ = _split_key(full_key)
+        if not key_id:
+            return None
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        if self._use_postgres:
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT verification_token FROM api_keys "
+                        "WHERE key_id = %s AND verified = false AND token_expires_at > %s",
+                        (key_id, now_iso),
+                    )
+                    row = cur.fetchone()
+                finally:
+                    self._pg.release_connection(conn)
+                return row[0] if row else None
+            except Exception as exc:
+                logger.warning("DB get_verification_token failed: %s", exc)
+                return None
+
+        try:
+            with self._sqlite_cursor() as cur:
+                cur.execute(
+                    "SELECT verification_token FROM api_keys "
+                    "WHERE key_id = ? AND verified = 0 AND token_expires_at > ?",
+                    (key_id, now_iso),
+                )
+                row = cur.fetchone()
+            return row["verification_token"] if row else None
+        except Exception as exc:
+            logger.warning("SQLite get_verification_token failed: %s", exc)
+            return None
+
+    def verify_api_key_email(self, token: str) -> bool:
+        """Mark the key associated with *token* as verified.
+
+        Returns True on success, False when the token is invalid, expired,
+        already used, or not found.
+        """
+        if not token:
+            return False
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        if self._use_postgres:
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "UPDATE api_keys "
+                        "SET verified = true, verification_token = NULL, token_expires_at = NULL "
+                        "WHERE verification_token = %s AND verified = false AND token_expires_at > %s "
+                        "RETURNING key_id",
+                        (token, now_iso),
+                    )
+                    row = cur.fetchone()
+                    conn.commit()
+                finally:
+                    self._pg.release_connection(conn)
+                return row is not None
+            except Exception as exc:
+                logger.warning("DB verify_api_key_email failed: %s", exc)
+                return False
+
+        try:
+            with self._sqlite_cursor() as cur:
+                cur.execute(
+                    "UPDATE api_keys "
+                    "SET verified = 1, verification_token = NULL, token_expires_at = NULL "
+                    "WHERE verification_token = ? AND verified = 0 AND token_expires_at > ?",
+                    (token, now_iso),
+                )
+                updated = cur.rowcount
+            return updated > 0
+        except Exception as exc:
+            logger.warning("SQLite verify_api_key_email failed: %s", exc)
+            return False
 
     def validate_api_key(self, key: str) -> dict | None:
         """Return the key record if valid and active, else None.
@@ -539,7 +673,7 @@ class DatabaseManager:
                         cur = conn.cursor()
                         cur.execute(
                             "SELECT key_id, key_hash, owner_email, plan, monthly_limit, "
-                            "current_month_count, active "
+                            "current_month_count, active, verified "
                             "FROM api_keys WHERE key_id = %s",
                             (key_id,),
                         )
@@ -553,7 +687,7 @@ class DatabaseManager:
                     return {
                         "key": key_id, "owner_email": row[2], "plan": row[3],
                         "monthly_limit": row[4], "current_month_count": row[5],
-                        "active": bool(row[6]),
+                        "active": bool(row[6]), "verified": bool(row[7]),
                     }
                 except Exception as exc:
                     logger.warning("DB validate_api_key (new format) failed: %s", exc)
@@ -563,7 +697,7 @@ class DatabaseManager:
                 with self._sqlite_cursor() as cur:
                     cur.execute(
                         "SELECT key_id, key_hash, owner_email, plan, monthly_limit, "
-                        "current_month_count, active "
+                        "current_month_count, active, verified "
                         "FROM api_keys WHERE key_id = ?",
                         (key_id,),
                     )
@@ -575,7 +709,7 @@ class DatabaseManager:
                 return {
                     "key": row["key_id"], "owner_email": row["owner_email"], "plan": row["plan"],
                     "monthly_limit": row["monthly_limit"], "current_month_count": row["current_month_count"],
-                    "active": bool(row["active"]),
+                    "active": bool(row["active"]), "verified": bool(row["verified"]),
                 }
             except Exception as exc:
                 logger.warning("SQLite validate_api_key (new format) failed: %s", exc)
@@ -603,7 +737,8 @@ class DatabaseManager:
                     return None
                 return {
                     "key": row[0], "owner_email": row[1], "plan": row[2],
-                    "monthly_limit": row[3], "current_month_count": row[4], "active": bool(row[5]),
+                    "monthly_limit": row[3], "current_month_count": row[4],
+                    "active": bool(row[5]), "verified": True,  # legacy keys treated as verified
                 }
             except Exception as exc:
                 logger.warning("DB validate_api_key (old format) failed: %s", exc)
@@ -626,7 +761,7 @@ class DatabaseManager:
             return {
                 "key": row["key"], "owner_email": row["owner_email"], "plan": row["plan"],
                 "monthly_limit": row["monthly_limit"], "current_month_count": row["current_month_count"],
-                "active": bool(row["active"]),
+                "active": bool(row["active"]), "verified": True,  # legacy keys treated as verified
             }
         except Exception as exc:
             logger.warning("SQLite validate_api_key (old format) failed: %s", exc)
@@ -953,6 +1088,205 @@ class DatabaseManager:
         except Exception as exc:
             logger.warning("SQLite get_unlabeled_session_count failed: %s", exc)
             return 0
+
+    # ── Webhook Management ────────────────────────────────────────────────────
+
+    def register_webhook(self, api_key_id: str, url: str, secret: str, events: str) -> int:
+        """Insert a new webhook row and return its id (-1 on failure)."""
+        if self._use_postgres:
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "INSERT INTO webhooks (api_key_id, url, secret, events) "
+                        "VALUES (%s, %s, %s, %s) RETURNING id",
+                        (api_key_id, url, secret, events),
+                    )
+                    row_id = cur.fetchone()[0]
+                    conn.commit()
+                    return row_id
+                finally:
+                    self._pg.release_connection(conn)
+            except Exception as exc:
+                logger.warning("DB register_webhook failed: %s", exc)
+                return -1
+
+        try:
+            with self._sqlite_cursor() as cur:
+                cur.execute(
+                    "INSERT INTO webhooks (api_key_id, url, secret, events) VALUES (?, ?, ?, ?)",
+                    (api_key_id, url, secret, events),
+                )
+                return cur.lastrowid
+        except Exception as exc:
+            logger.warning("SQLite register_webhook failed: %s", exc)
+            return -1
+
+    def get_webhooks_for_key(self, api_key_id: str, active_only: bool = True) -> list:
+        """Return webhooks for the given api_key_id.
+
+        active_only=True (default) returns only active webhooks for delivery.
+        active_only=False returns all webhooks (for the list endpoint).
+        """
+        _cols = (
+            "id, api_key_id, url, secret, events, active, created_at, "
+            "last_triggered_at, failure_count"
+        )
+        if self._use_postgres:
+            _where = "WHERE api_key_id = %s" + (" AND active = true" if active_only else "")
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(f"SELECT {_cols} FROM webhooks {_where}", (api_key_id,))
+                    cols = [d[0] for d in cur.description]
+                    return [dict(zip(cols, row)) for row in cur.fetchall()]
+                finally:
+                    self._pg.release_connection(conn)
+            except Exception as exc:
+                logger.warning("DB get_webhooks_for_key failed: %s", exc)
+                return []
+
+        _where_sq = "WHERE api_key_id = ?" + (" AND active = 1" if active_only else "")
+        try:
+            with self._sqlite_cursor() as cur:
+                cur.execute(f"SELECT {_cols} FROM webhooks {_where_sq}", (api_key_id,))
+                return [dict(row) for row in cur.fetchall()]
+        except Exception as exc:
+            logger.warning("SQLite get_webhooks_for_key failed: %s", exc)
+            return []
+
+    def update_webhook_status(self, webhook_id: int, success: bool):
+        """On success: reset failure_count, set last_triggered_at.
+        On failure: increment failure_count; disable after 5 consecutive failures.
+        """
+        if success:
+            if self._use_postgres:
+                try:
+                    conn = self._pg.get_connection()
+                    try:
+                        cur = conn.cursor()
+                        cur.execute(
+                            "UPDATE webhooks SET last_triggered_at = NOW(), failure_count = 0 "
+                            "WHERE id = %s",
+                            (webhook_id,),
+                        )
+                        conn.commit()
+                    finally:
+                        self._pg.release_connection(conn)
+                except Exception as exc:
+                    logger.warning("DB update_webhook_status (success) failed: %s", exc)
+                return
+            try:
+                with self._sqlite_cursor() as cur:
+                    cur.execute(
+                        "UPDATE webhooks SET last_triggered_at = CURRENT_TIMESTAMP, "
+                        "failure_count = 0 WHERE id = ?",
+                        (webhook_id,),
+                    )
+            except Exception as exc:
+                logger.warning("SQLite update_webhook_status (success) failed: %s", exc)
+            return
+
+        # Failure path: increment and auto-disable after threshold
+        if self._use_postgres:
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "UPDATE webhooks "
+                        "SET failure_count = failure_count + 1, "
+                        "    active = CASE WHEN failure_count + 1 >= 5 THEN false ELSE active END "
+                        "WHERE id = %s",
+                        (webhook_id,),
+                    )
+                    conn.commit()
+                finally:
+                    self._pg.release_connection(conn)
+            except Exception as exc:
+                logger.warning("DB update_webhook_status (failure) failed: %s", exc)
+            return
+
+        try:
+            with self._sqlite_cursor() as cur:
+                cur.execute(
+                    "UPDATE webhooks "
+                    "SET failure_count = failure_count + 1, "
+                    "    active = CASE WHEN failure_count + 1 >= 5 THEN 0 ELSE active END "
+                    "WHERE id = ?",
+                    (webhook_id,),
+                )
+        except Exception as exc:
+            logger.warning("SQLite update_webhook_status (failure) failed: %s", exc)
+
+    def delete_webhook(self, webhook_id: int, api_key_id: str) -> bool:
+        """Delete a webhook scoped to api_key_id. Returns True if a row was removed."""
+        if self._use_postgres:
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "DELETE FROM webhooks WHERE id = %s AND api_key_id = %s",
+                        (webhook_id, api_key_id),
+                    )
+                    deleted = cur.rowcount > 0
+                    conn.commit()
+                    return deleted
+                finally:
+                    self._pg.release_connection(conn)
+            except Exception as exc:
+                logger.warning("DB delete_webhook failed: %s", exc)
+                return False
+
+        try:
+            with self._sqlite_cursor() as cur:
+                cur.execute(
+                    "DELETE FROM webhooks WHERE id = ? AND api_key_id = ?",
+                    (webhook_id, api_key_id),
+                )
+                return cur.rowcount > 0
+        except Exception as exc:
+            logger.warning("SQLite delete_webhook failed: %s", exc)
+            return False
+
+    def get_webhook_by_id(self, webhook_id: int, api_key_id: str) -> dict | None:
+        """Return a single webhook by id, scoped to api_key_id (or None)."""
+        _cols = (
+            "id, api_key_id, url, secret, events, active, created_at, "
+            "last_triggered_at, failure_count"
+        )
+        if self._use_postgres:
+            try:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        f"SELECT {_cols} FROM webhooks WHERE id = %s AND api_key_id = %s",
+                        (webhook_id, api_key_id),
+                    )
+                    cols = [d[0] for d in cur.description]
+                    row = cur.fetchone()
+                    return dict(zip(cols, row)) if row else None
+                finally:
+                    self._pg.release_connection(conn)
+            except Exception as exc:
+                logger.warning("DB get_webhook_by_id failed: %s", exc)
+                return None
+
+        try:
+            with self._sqlite_cursor() as cur:
+                cur.execute(
+                    f"SELECT {_cols} FROM webhooks WHERE id = ? AND api_key_id = ?",
+                    (webhook_id, api_key_id),
+                )
+                row = cur.fetchone()
+            return dict(row) if row else None
+        except Exception as exc:
+            logger.warning("SQLite get_webhook_by_id failed: %s", exc)
+            return None
 
     def mark_sessions_as_trained(self, session_ids: list):
         """Set trained_at = now() for the given session IDs so they won't retrigger training."""

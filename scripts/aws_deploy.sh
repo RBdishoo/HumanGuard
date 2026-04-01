@@ -24,6 +24,7 @@ IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$REPO_NAME:latest
 API_NAME=humanguard-api
 CLOUDWATCH_ENABLED=true
 SNS_ALERT_EMAIL=${SNS_ALERT_EMAIL:-"rbdishoo@gmail.com"}
+SENDER_EMAIL=${SENDER_EMAIL:-"noreply@humanguard.net"}
 DB_MAX_CONNECTIONS=5
 ALLOWED_ORIGINS_PROD="https://humanguard.net,https://www.humanguard.net,https://d1hi33wespusty.cloudfront.net,http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com"
 
@@ -183,6 +184,29 @@ aws iam attach-role-policy \
     --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 echo "AWSLambdaBasicExecutionRole attached to '$ROLE_NAME'."
 
+# Grant Lambda permission to send emails via SES
+SES_POLICY_NAME="humanguard-ses-send"
+SES_POLICY_DOC='{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ses:SendEmail",
+        "ses:SendRawEmail"
+      ],
+      "Resource": "*"
+    }
+  ]
+}'
+aws iam put-role-policy \
+    --role-name "$ROLE_NAME" \
+    --policy-name "$SES_POLICY_NAME" \
+    --policy-document "$SES_POLICY_DOC" \
+    2>/dev/null \
+    && echo "SES send policy '$SES_POLICY_NAME' attached to '$ROLE_NAME'." \
+    || echo "SES send policy already exists or attachment failed — continuing."
+
 # Allow IAM role to propagate before Lambda creation
 echo "Waiting 10 seconds for IAM role propagation..."
 sleep 10
@@ -205,6 +229,7 @@ ENV_VARS=$(env \
     _MK="$HUMANGUARD_MASTER_KEY" \
     _EK="$EXPORT_API_KEY" \
     _AO="$ALLOWED_ORIGINS_PROD" \
+    _SE="$SENDER_EMAIL" \
     python3 -c "
 import json, os
 print(json.dumps({'Variables': {
@@ -216,6 +241,7 @@ print(json.dumps({'Variables': {
     'HUMANGUARD_MASTER_KEY':os.environ['_MK'],
     'EXPORT_API_KEY':       os.environ['_EK'],
     'ALLOWED_ORIGINS':      os.environ['_AO'],
+    'SENDER_EMAIL':         os.environ['_SE'],
 }}))")
 
 if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$AWS_REGION" > /dev/null 2>&1; then

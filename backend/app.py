@@ -17,6 +17,8 @@ Architecture:
 from flask import Flask, request, jsonify, send_from_directory, g
 from flask_cors import CORS
 import functools
+import hashlib
+import hmac as _hmac
 import logging
 import os
 import re
@@ -24,6 +26,8 @@ import sys
 import json
 import time
 import threading
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,7 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from collectors.signal_collector import SignalCollector
 from utils.helpers import isValidSignalBatch, normalizeSignalBatch, formatTimestamp
 from monitoring import metrics
-from db import db as db_manager
+from db import db as db_manager, _key_id_from_full
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +60,7 @@ ALLOWED_ORIGINS = [
 CORS(app, resources={r"/api/*": {
     "origins": ALLOWED_ORIGINS,
     "allow_headers": ["Content-Type", "X-Api-Key", "X-Export-Key"],
-    "methods": ["GET", "POST", "OPTIONS"],
+    "methods": ["GET", "POST", "DELETE", "OPTIONS"],
 }})
 
 #Initialize Signal Collector
@@ -116,6 +120,7 @@ FEATURE_INTERPRETATIONS = {
 
 
 FREE_TIER_LIMIT = 1000
+UNVERIFIED_TRIAL_LIMIT = 10  # free requests before email verification is required
 
 # IP-based rate limiting for /api/register
 _registration_attempts: dict = {}
@@ -161,6 +166,17 @@ def require_api_key(f=None, *, count_usage=True):
             g.api_key = api_key
             g.is_master = False
             if count_usage:
+                # Enforce email verification after UNVERIFIED_TRIAL_LIMIT scored requests
+                if not record.get("verified", True):
+                    if record["current_month_count"] >= UNVERIFIED_TRIAL_LIMIT:
+                        return jsonify({
+                            "error": "email verification required",
+                            "verify_url": "https://d1hi33wespusty.cloudfront.net/verify.html",
+                            "message": (
+                                f"Your trial of {UNVERIFIED_TRIAL_LIMIT} requests has been used. "
+                                "Please verify your email to continue."
+                            ),
+                        }), 403
                 # Atomic check-and-increment: only succeeds if under limit
                 result = db_manager.atomic_increment_usage(api_key)
                 if result is None:
@@ -335,6 +351,81 @@ def _log_prediction_local(session_id, prob_bot, label, threshold,
         logger.warning("Failed to write prediction log: %s", exc)
 
 
+def _deliver_webhook(webhook: dict, payload_bytes: bytes):
+    """POST a signed payload to a single webhook URL and update its DB status."""
+    secret = webhook.get("secret", "")
+    sig = _hmac.new(secret.encode(), payload_bytes, hashlib.sha256).hexdigest()
+    req = urllib.request.Request(
+        webhook["url"],
+        data=payload_bytes,
+        headers={
+            "Content-Type": "application/json",
+            "X-HumanGuard-Signature": f"sha256={sig}",
+        },
+        method="POST",
+    )
+    success = False
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            success = 200 <= resp.status < 300
+    except Exception as exc:
+        logger.debug("Webhook delivery failed for id=%s: %s", webhook.get("id"), exc)
+    db_manager.update_webhook_status(webhook["id"], success)
+
+
+def _fire_webhooks(api_key_id: str, session_id: str, prob_bot: float,
+                   label: str, confidence: str, confidence_interval: dict,
+                   top_features: list):
+    """Look up active webhooks for api_key_id and dispatch matching ones in daemon threads."""
+    if not api_key_id:
+        return
+
+    try:
+        webhooks = db_manager.get_webhooks_for_key(api_key_id, active_only=True)
+    except Exception as exc:
+        logger.warning("Failed to fetch webhooks: %s", exc)
+        return
+
+    if not webhooks:
+        return
+
+    # Determine which event types this result qualifies for
+    active_events: set = {"score_completed"}
+    if label == "bot":
+        active_events.add("bot_detected")
+        if confidence == "high":
+            active_events.add("high_confidence_bot")
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    for webhook in webhooks:
+        wh_events = {e.strip() for e in webhook.get("events", "").split(",") if e.strip()}
+        matched = active_events & wh_events
+        if not matched:
+            continue
+        # Pick most-specific event for the payload label
+        event_name = next(
+            (e for e in ("high_confidence_bot", "bot_detected", "score_completed") if e in matched),
+            "score_completed",
+        )
+        payload = {
+            "event": event_name,
+            "timestamp": timestamp,
+            "session_id": session_id,
+            "prob_bot": prob_bot,
+            "confidence": confidence,
+            "confidence_interval": confidence_interval,
+            "top_features": (top_features or [])[:3],
+        }
+        payload_bytes = json.dumps(payload).encode("utf-8")
+        t = threading.Thread(
+            target=_deliver_webhook,
+            args=(webhook, payload_bytes),
+            daemon=True,
+        )
+        t.start()
+
+
 @app.route('/api/score', methods=['POST'])
 @require_api_key
 def scoreSignals():
@@ -477,6 +568,17 @@ def scoreSignals():
             ground_truth_label=payload_ground_truth,
         )
         metrics.record_prediction(is_bot=(label == "bot"), latency_ms=_response_time_ms)
+
+        # Fire webhooks asynchronously — never blocks the score response
+        _fire_webhooks(
+            api_key_id=_key_id_from_full(getattr(g, "api_key", "") or ""),
+            session_id=data.get("sessionID"),
+            prob_bot=prob_bot,
+            label=label,
+            confidence=_confidence_level,
+            confidence_interval={"lower": round(_ci_lower, 4), "upper": round(_ci_upper, 4)},
+            top_features=(response.get("explanation") or {}).get("top_features"),
+        )
 
         return jsonify(response), 200
 
@@ -1324,12 +1426,50 @@ def registerApiKey():
         return jsonify({"error": "A valid email address is required"}), 400
 
     api_key = db_manager.generate_api_key(email)
+
+    # Send verification email (non-blocking — failure does not abort registration)
+    try:
+        from backend.email_service import send_verification_email
+        token = db_manager.get_verification_token(api_key)
+        # key_id is the prefix before the dot
+        key_id_part = api_key.split(".")[0] if "." in api_key else api_key
+        if token:
+            send_verification_email(email, token, key_id_part)
+    except Exception as _email_exc:
+        logger.warning("Email send failed during registration: %s", _email_exc)
+
     return jsonify({
         "api_key": api_key,
+        "verified": False,
         "plan": "free",
         "monthly_limit": FREE_TIER_LIMIT,
+        "trial_requests": UNVERIFIED_TRIAL_LIMIT,
+        "message": "Check your email to verify your API key and unlock full access.",
         "docs_url": "https://github.com/rubenbetabdishoo/HumanGuard#api",
     }), 201
+
+
+@app.route('/api/verify', methods=['GET'])
+def verifyEmail():
+    """
+    GET /api/verify?token=<token>
+    Verifies the email address associated with an API key.
+    Returns JSON success or failure (also consumed by frontend/verify.html).
+    """
+    token = request.args.get("token", "").strip()
+    if not token:
+        return jsonify({"success": False, "error": "Missing token"}), 400
+
+    ok = db_manager.verify_api_key_email(token)
+    if ok:
+        return jsonify({
+            "success": True,
+            "message": "Email verified! Your API key is now active.",
+        }), 200
+    return jsonify({
+        "success": False,
+        "error": "Invalid or expired token. Please request a new verification email.",
+    }), 400
 
 
 @app.route('/api/usage', methods=['GET'])
@@ -1383,6 +1523,123 @@ def clientDashboard():
 def registerPage():
     """GET /register — Serves the API key registration page."""
     return send_from_directory('../frontend', 'register.html')
+
+
+@app.route('/verify.html', methods=['GET'])
+@app.route('/verify', methods=['GET'])
+def verifyPage():
+    """GET /verify — Serves the email verification page."""
+    return send_from_directory('../frontend', 'verify.html')
+
+
+# ── Webhook endpoints ─────────────────────────────────────────────────────────
+
+_VALID_EVENTS = {"bot_detected", "score_completed", "high_confidence_bot"}
+
+
+@app.route('/api/webhooks', methods=['POST'])
+@require_api_key(count_usage=False)
+def registerWebhook():
+    """POST /api/webhooks — Register a new webhook for the calling API key."""
+    data = request.get_json(silent=True) or {}
+    url = str(data.get("url", "")).strip()
+    secret = str(data.get("secret", "")).strip()
+    events = data.get("events") or []
+
+    if not url or not url.startswith(("http://", "https://")):
+        return jsonify({"error": "url must be a valid http/https URL"}), 400
+    if not secret:
+        return jsonify({"error": "secret is required"}), 400
+    if not events or not isinstance(events, list):
+        return jsonify({"error": "events must be a non-empty list"}), 400
+
+    unknown = set(events) - _VALID_EVENTS
+    if unknown:
+        return jsonify({"error": f"unknown events: {sorted(unknown)}",
+                        "valid_events": sorted(_VALID_EVENTS)}), 400
+
+    api_key_id = _key_id_from_full(getattr(g, "api_key", "") or "")
+    events_str = ",".join(sorted(set(events)))
+    webhook_id = db_manager.register_webhook(api_key_id, url, secret, events_str)
+    if webhook_id == -1:
+        return jsonify({"error": "internal server error"}), 500
+
+    return jsonify({"id": webhook_id, "url": url, "events": events, "active": True}), 201
+
+
+@app.route('/api/webhooks', methods=['GET'])
+@require_api_key(count_usage=False)
+def listWebhooks():
+    """GET /api/webhooks — List all webhooks for the calling API key."""
+    api_key_id = _key_id_from_full(getattr(g, "api_key", "") or "")
+    webhooks = db_manager.get_webhooks_for_key(api_key_id, active_only=False)
+    result = []
+    for wh in webhooks:
+        created = wh.get("created_at")
+        last_triggered = wh.get("last_triggered_at")
+        result.append({
+            "id": wh["id"],
+            "url": wh["url"],
+            "events": [e for e in wh.get("events", "").split(",") if e],
+            "active": bool(wh["active"]),
+            "failure_count": wh.get("failure_count", 0),
+            "created_at": created.isoformat() if hasattr(created, "isoformat") else created,
+            "last_triggered_at": (
+                last_triggered.isoformat()
+                if hasattr(last_triggered, "isoformat") else last_triggered
+            ),
+        })
+    return jsonify(result), 200
+
+
+@app.route('/api/webhooks/<int:webhook_id>', methods=['DELETE'])
+@require_api_key(count_usage=False)
+def deleteWebhook(webhook_id):
+    """DELETE /api/webhooks/<id> — Remove a webhook (scoped to calling key)."""
+    api_key_id = _key_id_from_full(getattr(g, "api_key", "") or "")
+    deleted = db_manager.delete_webhook(webhook_id, api_key_id)
+    if not deleted:
+        return jsonify({"error": "webhook not found"}), 404
+    return jsonify({"deleted": True, "id": webhook_id}), 200
+
+
+@app.route('/api/webhooks/<int:webhook_id>/test', methods=['POST'])
+@require_api_key(count_usage=False)
+def testWebhook(webhook_id):
+    """POST /api/webhooks/<id>/test — Send a test payload to verify the webhook URL."""
+    api_key_id = _key_id_from_full(getattr(g, "api_key", "") or "")
+    webhook = db_manager.get_webhook_by_id(webhook_id, api_key_id)
+    if webhook is None:
+        return jsonify({"error": "webhook not found"}), 404
+
+    payload = {
+        "event": "test",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "session_id": "test-session",
+        "prob_bot": 0.5,
+        "confidence": "high",
+        "confidence_interval": {"lower": 0.4, "upper": 0.6},
+        "top_features": [],
+    }
+    payload_bytes = json.dumps(payload).encode("utf-8")
+
+    secret = webhook.get("secret", "")
+    sig = _hmac.new(secret.encode(), payload_bytes, hashlib.sha256).hexdigest()
+    req = urllib.request.Request(
+        webhook["url"],
+        data=payload_bytes,
+        headers={
+            "Content-Type": "application/json",
+            "X-HumanGuard-Signature": f"sha256={sig}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            success = 200 <= resp.status < 300
+        return jsonify({"success": success, "signature": f"sha256={sig}"}), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 200
 
 
 if IS_LAMBDA:
