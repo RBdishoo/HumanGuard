@@ -304,11 +304,11 @@ def add_email_verification_columns(database_url: str):
         "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS verification_token  VARCHAR(64)",
         "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS token_expires_at    TIMESTAMPTZ",
         "CREATE INDEX IF NOT EXISTS idx_api_keys_token ON api_keys (verification_token)",
-        # Webhooks table
+        # Webhooks table (api_key_id is TEXT to accommodate master keys and any key format)
         """
         CREATE TABLE IF NOT EXISTS webhooks (
             id                  SERIAL PRIMARY KEY,
-            api_key_id          VARCHAR(16) NOT NULL,
+            api_key_id          TEXT NOT NULL,
             url                 TEXT NOT NULL,
             secret              TEXT NOT NULL,
             events              TEXT NOT NULL DEFAULT 'bot_detected',
@@ -319,6 +319,8 @@ def add_email_verification_columns(database_url: str):
         )
         """,
         "CREATE INDEX IF NOT EXISTS idx_webhooks_api_key_id ON webhooks (api_key_id)",
+        # Widen api_key_id if table was previously created with VARCHAR(16)
+        "ALTER TABLE webhooks ALTER COLUMN api_key_id TYPE TEXT",
     ]
 
     conn = psycopg2.connect(database_url)
