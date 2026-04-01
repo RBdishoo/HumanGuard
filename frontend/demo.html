@@ -265,6 +265,38 @@
     .verdict-suspicious { background: #2d2612; color: #d29922; }
     .verdict-bot     { background: #3d1c1c; color: #f85149; }
 
+    /* ── Confidence ── */
+    .confidence-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin: 8px 0 4px;
+      flex-wrap: wrap;
+    }
+    .confidence-badge {
+      display: inline-block;
+      padding: 3px 12px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .conf-high   { background: #1c3d2a; color: #3fb950; }
+    .conf-medium { background: #2d2612; color: #d29922; }
+    .conf-low    { background: #3d1c1c; color: #f85149; }
+    .ci-label {
+      font-size: 12px;
+      color: #8b949e;
+    }
+    .conf-note {
+      font-size: 11px;
+      color: #d29922;
+      text-align: center;
+      margin-bottom: 6px;
+    }
+
     .prob-display {
       font-size: 40px;
       font-weight: bold;
@@ -601,7 +633,12 @@
         <div class="result-header">
           <div class="verdict-badge" id="verdictBadge">—</div>
           <div class="prob-display" id="probDisplay">—</div>
-          <div class="prob-label">Bot Probability</div>
+          <div class="prob-label" id="ciLabel">Bot Probability</div>
+          <div class="confidence-row" id="confidenceRow" style="display:none">
+            <span class="confidence-badge" id="confidenceBadge"></span>
+            <span class="ci-label" id="ciRangeLabel"></span>
+          </div>
+          <div class="conf-note" id="confNote" style="display:none">Uncertain — try interacting more</div>
         </div>
 
         <div class="prob-bar-bg">
@@ -818,6 +855,25 @@
       badge.textContent = verdictText;
       badge.className = 'verdict-badge ' + verdictClass;
       document.getElementById('probDisplay').style.color = probColor(prob);
+
+      // Confidence interval
+      if (data.confidence && data.confidence_interval) {
+        const ci = data.confidence_interval;
+        const ciLower = Math.round(ci.lower * 100);
+        const ciUpper = Math.round(ci.upper * 100);
+        const confLabel = data.confidence.charAt(0).toUpperCase() + data.confidence.slice(1) + ' Confidence';
+        const confClass = data.confidence === 'high' ? 'conf-high' : data.confidence === 'medium' ? 'conf-medium' : 'conf-low';
+
+        const badge = document.getElementById('confidenceBadge');
+        badge.textContent = confLabel;
+        badge.className = 'confidence-badge ' + confClass;
+
+        document.getElementById('ciRangeLabel').textContent = `Bot probability: ${pct}% (${ciLower}%–${ciUpper}%)`;
+        document.getElementById('confidenceRow').style.display = 'flex';
+
+        const note = document.getElementById('confNote');
+        note.style.display = data.confidence === 'low' ? 'block' : 'none';
+      }
 
       // SHAP top 3 features
       const expl = data.explanation;

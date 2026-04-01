@@ -407,6 +407,21 @@ def scoreSignals():
         prob_bot = float(bundle["model"].predict_proba(x_scaled)[0, 1])
         label = "bot" if prob_bot >= float(bundle["threshold"]) else "human"
 
+        # Confidence interval via tree variance (RandomForest / ensemble models).
+        _model = bundle["model"]
+        if hasattr(_model, "estimators_"):
+            _tree_preds = np.array([
+                tree.predict_proba(x_scaled)[0][1] for tree in _model.estimators_
+            ])
+            _std = float(np.std(_tree_preds))
+            _ci_lower = float(max(0.0, prob_bot - 1.96 * _std))
+            _ci_upper = float(min(1.0, prob_bot + 1.96 * _std))
+        else:
+            _std = 0.0
+            _ci_lower = prob_bot
+            _ci_upper = prob_bot
+        _confidence_level = "high" if _std < 0.1 else "medium" if _std < 0.2 else "low"
+
         # Save prediction to PostgreSQL if available; tag with api_key as source
         try:
             from db.db_client import is_available as db_available, save_prediction
@@ -437,6 +452,12 @@ def scoreSignals():
             "prob_bot": prob_bot,
             "label": label,
             "threshold": float(bundle["threshold"]),
+            "confidence": _confidence_level,
+            "confidence_interval": {
+                "lower": round(_ci_lower, 4),
+                "upper": round(_ci_upper, 4),
+            },
+            "std": round(_std, 4),
         }
 
         # SHAP explanation — opt-out with ?explain=false
