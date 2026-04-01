@@ -25,6 +25,7 @@ API_NAME=humanguard-api
 CLOUDWATCH_ENABLED=true
 SNS_ALERT_EMAIL=${SNS_ALERT_EMAIL:-"rbdishoo@gmail.com"}
 DB_MAX_CONNECTIONS=5
+ALLOWED_ORIGINS_PROD="https://humanguard.net,https://www.humanguard.net,https://d1hi33wespusty.cloudfront.net,http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com"
 
 # Fetch master key from Secrets Manager; generate and store one on first run.
 HUMANGUARD_MASTER_KEY=${HUMANGUARD_MASTER_KEY:-""}
@@ -194,7 +195,28 @@ sleep 10
 echo ""
 echo "--- Step 6: Create or update Lambda function ---"
 
-ENV_VARS="Variables={PORT=8080,CLOUDWATCH_ENABLED=$CLOUDWATCH_ENABLED,SNS_ALERT_EMAIL=$SNS_ALERT_EMAIL,DATABASE_URL=$DATABASE_URL,DB_MAX_CONNECTIONS=$DB_MAX_CONNECTIONS,HUMANGUARD_MASTER_KEY=$HUMANGUARD_MASTER_KEY,EXPORT_API_KEY=$EXPORT_API_KEY}"
+# Build env JSON via python3 so commas inside ALLOWED_ORIGINS don't break parsing.
+ENV_VARS=$(env \
+    _PORT="8080" \
+    _CW="$CLOUDWATCH_ENABLED" \
+    _SNS="$SNS_ALERT_EMAIL" \
+    _DB="$DATABASE_URL" \
+    _DBMAX="$DB_MAX_CONNECTIONS" \
+    _MK="$HUMANGUARD_MASTER_KEY" \
+    _EK="$EXPORT_API_KEY" \
+    _AO="$ALLOWED_ORIGINS_PROD" \
+    python3 -c "
+import json, os
+print(json.dumps({'Variables': {
+    'PORT':                 os.environ['_PORT'],
+    'CLOUDWATCH_ENABLED':   os.environ['_CW'],
+    'SNS_ALERT_EMAIL':      os.environ['_SNS'],
+    'DATABASE_URL':         os.environ['_DB'],
+    'DB_MAX_CONNECTIONS':   os.environ['_DBMAX'],
+    'HUMANGUARD_MASTER_KEY':os.environ['_MK'],
+    'EXPORT_API_KEY':       os.environ['_EK'],
+    'ALLOWED_ORIGINS':      os.environ['_AO'],
+}}))")
 
 if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$AWS_REGION" > /dev/null 2>&1; then
     echo "Lambda function '$FUNCTION_NAME' exists — updating code and configuration."

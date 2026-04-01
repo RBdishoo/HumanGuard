@@ -4,7 +4,7 @@ import json
 from unittest import mock
 
 import numpy as np
-import xgboost as xgb
+from sklearn.ensemble import RandomForestClassifier
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
@@ -15,14 +15,12 @@ FEATURE_NAMES = ["feat_a", "feat_b", "feat_c", "feat_d", "feat_e", "feat_f"]
 
 
 def _make_bundle():
-    """Build a scoring bundle with a real XGBoost model on dummy data."""
+    """Build a scoring bundle with a real RandomForest model on dummy data."""
     rng = np.random.RandomState(42)
     X_train = rng.rand(80, len(FEATURE_NAMES))
     y_train = (X_train[:, 0] > 0.5).astype(int)
 
-    model = xgb.XGBClassifier(
-        n_estimators=10, max_depth=2, random_state=42, eval_metric="logloss"
-    )
+    model = RandomForestClassifier(n_estimators=10, max_depth=2, random_state=42)
     model.fit(X_train, y_train)
 
     scaler = mock.MagicMock()

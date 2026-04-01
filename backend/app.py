@@ -39,8 +39,22 @@ logger = logging.getLogger(__name__)
 
 #Initialize Flask application
 app = Flask(__name__, static_folder='../frontend', static_url_path='')
+_DEFAULT_ORIGINS = ",".join([
+    "https://humanguard.net",
+    "https://www.humanguard.net",
+    "https://d1hi33wespusty.cloudfront.net",
+    "http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com",
+    "http://localhost:5000",
+    "http://localhost:5050",
+])
+ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.environ.get("ALLOWED_ORIGINS", _DEFAULT_ORIGINS).split(",")
+    if o.strip()
+]
+
 CORS(app, resources={r"/api/*": {
-    "origins": "*",
+    "origins": ALLOWED_ORIGINS,
     "allow_headers": ["Content-Type", "X-Api-Key", "X-Export-Key"],
     "methods": ["GET", "POST", "OPTIONS"],
 }})
