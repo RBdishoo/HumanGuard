@@ -291,6 +291,52 @@ def add_key_hash_columns(database_url: str):
         conn.close()
 
 
+def add_email_verification_columns(database_url: str):
+    """
+    Add email-verification columns to api_keys and create the webhooks table.
+    Safe to run multiple times — uses IF NOT EXISTS / ADD COLUMN IF NOT EXISTS.
+    """
+    import psycopg2
+
+    migrations = [
+        # Email verification columns on api_keys
+        "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS verified            BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS verification_token  VARCHAR(64)",
+        "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS token_expires_at    TIMESTAMPTZ",
+        "CREATE INDEX IF NOT EXISTS idx_api_keys_token ON api_keys (verification_token)",
+        # Webhooks table
+        """
+        CREATE TABLE IF NOT EXISTS webhooks (
+            id                  SERIAL PRIMARY KEY,
+            api_key_id          VARCHAR(16) NOT NULL,
+            url                 TEXT NOT NULL,
+            secret              TEXT NOT NULL,
+            events              TEXT NOT NULL DEFAULT 'bot_detected',
+            active              BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at          TIMESTAMPTZ DEFAULT NOW(),
+            last_triggered_at   TIMESTAMPTZ,
+            failure_count       INTEGER NOT NULL DEFAULT 0
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_webhooks_api_key_id ON webhooks (api_key_id)",
+    ]
+
+    conn = psycopg2.connect(database_url)
+    try:
+        cur = conn.cursor()
+        for sql in migrations:
+            cur.execute(sql)
+            print(f"  OK: {sql.strip().splitlines()[0][:80]}")
+        conn.commit()
+        print("email-verification + webhooks migration complete.")
+    except Exception as exc:
+        conn.rollback()
+        print(f"Migration failed: {exc}")
+        raise
+    finally:
+        conn.close()
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -311,6 +357,7 @@ if __name__ == "__main__":
         add_leaderboard_table(db_url)
         add_api_keys_table(db_url)
         add_key_hash_columns(db_url)
+        add_email_verification_columns(db_url)
         sys.exit(0)
 
     print(f"=== HumanGuard RDS Setup (region={REGION}) ===\n")
