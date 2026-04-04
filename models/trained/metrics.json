@@ -9,10 +9,10 @@
   },
   {
     "model": "LogisticRegression",
-    "accuracy": 1.0,
-    "precision": 1.0,
+    "accuracy": 0.9984848484848485,
+    "precision": 0.9978308026030369,
     "recall": 1.0,
-    "f1": 1.0,
+    "f1": 0.998914223669924,
     "roc_auc": 1.0
   },
   {

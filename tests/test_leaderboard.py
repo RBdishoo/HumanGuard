@@ -242,15 +242,34 @@ def test_leaderboard_full_flow():
 
     Verifies the prediction written by /api/score is found by /api/leaderboard
     and that the response contains rank and total fields.
+    Uses a fake scoring bundle so the test is independent of the trained .pkl version.
     """
+    import numpy as np
+
     client = _client()
     session_id = "lb-e2e-flow-test-001"
+
+    fake_model = mock.MagicMock()
+    fake_model.predict_proba.return_value = np.array([[0.8, 0.2]])
+    fake_scaler = mock.MagicMock()
+    fake_scaler.transform.side_effect = lambda x: x
+    fake_extractor = mock.MagicMock()
+    fake_extractor.extractBatchFeatures.return_value = {}
+    fake_extractor.extract_network_features.return_value = {}
+    fake_bundle = {
+        "model": fake_model,
+        "scaler": fake_scaler,
+        "feature_names": ["f1", "f2"],
+        "threshold": 0.5,
+        "extractor": fake_extractor,
+    }
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
         tmp_path = Path(f.name)
 
     try:
-        with mock.patch.object(app_module, "PREDICTIONS_LOG", tmp_path):
+        with mock.patch.object(app_module, "PREDICTIONS_LOG", tmp_path), \
+             mock.patch("backend.app._load_scoring_bundle", return_value=fake_bundle):
             # Step 1: score the session
             score_resp = client.post(
                 "/api/score",
