@@ -12,6 +12,9 @@ if (!sessionID){
     localStorage.setItem("bd_session_id", sessionID)
 }
 
+const utmSource = new URLSearchParams(window.location.search).get('utm_source') || 'direct';
+const utmCampaign = new URLSearchParams(window.location.search).get('utm_campaign') || '';
+
 //In-memory buffers
 const signalsBuffer = {
     mouseMoves: [],
@@ -72,6 +75,9 @@ document.addEventListener("keydown", (e) =>{
 
     const payload = {
         sessionID: sessionID,
+        source: 'real_human',
+        utm_source: utmSource,
+        utm_campaign: utmCampaign,
         signals: payloadSignals,
         metadata: {
             userAgent: navigator.userAgent,

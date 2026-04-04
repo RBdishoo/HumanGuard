@@ -718,6 +718,9 @@
 
     // ── Session setup ──────────────────────────────────────────────────
     const SESSION_ID = 'demo-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+    const _demoParams = new URLSearchParams(window.location.search);
+    const utmSource = _demoParams.get('utm_source') || 'direct';
+    const utmCampaign = _demoParams.get('utm_campaign') || '';
     const signals = { mouseMoves: [], clicks: [], keys: [] };
 
     let lastMouseTime = 0;
@@ -795,6 +798,8 @@
       const payload = {
         sessionID: SESSION_ID,
         source: 'demo',
+        utm_source: utmSource,
+        utm_campaign: utmCampaign,
         label: 'human',
         metadata: {
           userAgent: navigator.userAgent,
