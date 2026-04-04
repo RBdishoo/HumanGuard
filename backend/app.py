@@ -1244,7 +1244,6 @@ def serveLeaderboard():
 
 
 @app.route('/api/leaderboard', methods=['POST'])
-@require_api_key
 def leaderboardPost():
     """
     POST /api/leaderboard
@@ -1324,7 +1323,6 @@ def leaderboardPost():
 
 
 @app.route('/api/leaderboard', methods=['GET'])
-@require_api_key
 def leaderboardGet():
     """
     GET /api/leaderboard
