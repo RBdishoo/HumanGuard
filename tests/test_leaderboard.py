@@ -235,3 +235,56 @@ def test_leaderboard_sanitizes_nickname():
     # Special chars stripped, max 20 chars
     assert "<" not in captured.get("nickname", "")
     assert len(captured.get("nickname", "")) <= 20
+
+
+def test_leaderboard_full_flow():
+    """End-to-end: score via /api/score then submit to /api/leaderboard.
+
+    Verifies the prediction written by /api/score is found by /api/leaderboard
+    and that the response contains rank and total fields.
+    """
+    client = _client()
+    session_id = "lb-e2e-flow-test-001"
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+        tmp_path = Path(f.name)
+
+    try:
+        with mock.patch.object(app_module, "PREDICTIONS_LOG", tmp_path):
+            # Step 1: score the session
+            score_resp = client.post(
+                "/api/score",
+                data=json.dumps(_score_batch(session_id)),
+                content_type="application/json",
+            )
+            assert score_resp.status_code == 200, (
+                f"Expected 200 from /api/score, got {score_resp.status_code}: {score_resp.data}"
+            )
+
+            # Step 2: submit to leaderboard using the same session_id
+            with mock.patch.object(app_module.db_manager, "save_leaderboard_entry", return_value=1):
+                with mock.patch.object(
+                    app_module.db_manager,
+                    "get_leaderboard",
+                    return_value=[{
+                        "nickname": "E2ETester",
+                        "prob_bot": json.loads(score_resp.data).get("prob_bot", 0.1),
+                        "verdict": json.loads(score_resp.data).get("label", "human"),
+                        "session_id": session_id,
+                        "created_at": "2026-04-04T00:00:00",
+                    }],
+                ):
+                    lb_resp = client.post(
+                        "/api/leaderboard",
+                        data=json.dumps({"nickname": "E2ETester", "session_id": session_id}),
+                        content_type="application/json",
+                    )
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    assert lb_resp.status_code == 200, (
+        f"Expected 200 from /api/leaderboard, got {lb_resp.status_code}: {lb_resp.data}"
+    )
+    body = json.loads(lb_resp.data)
+    assert "rank" in body
+    assert "total" in body

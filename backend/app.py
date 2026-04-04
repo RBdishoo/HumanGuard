@@ -526,16 +526,19 @@ def scoreSignals():
             _ci_upper = prob_bot
         _confidence_level = "high" if _std < 0.1 else "medium" if _std < 0.2 else "low"
 
-        # Save prediction to PostgreSQL if available; tag with api_key as source
+        # Persist prediction to DB (SQLite locally, PostgreSQL in production)
         try:
-            from db.db_client import is_available as db_available, save_prediction
-            if db_available():
-                _pred_source = payload_source or getattr(g, "api_key", None)
-                _caller_key = getattr(g, "api_key", None)
-                save_prediction(data.get("sessionID"), prob_bot, label, float(bundle["threshold"]),
-                                source=_pred_source, api_key=_caller_key)
+            _pred_source = payload_source or getattr(g, "api_key", None)
+            _caller_key = getattr(g, "api_key", None)
+            db_manager.save_prediction(
+                data.get("sessionID"), prob_bot, label == "bot",
+                threshold=float(bundle["threshold"]),
+                scoring_type="batch",
+                source=_pred_source,
+                api_key=_caller_key,
+            )
         except Exception as exc:
-            logger.warning("Failed to save prediction to PostgreSQL: %s", exc)
+            logger.warning("Failed to save prediction to DB: %s", exc)
 
         # Persist session metadata (source/label) when provided via demo or simulator.
         # Also save raw signals to JSONL so demo/simulator batches are available for
@@ -770,15 +773,17 @@ def _session_score_logic(session_id):
 
         label = "bot" if session_prob_bot >= threshold else "human"
 
-        # Save to PostgreSQL if available
+        # Persist session prediction to DB (SQLite locally, PostgreSQL in production)
         try:
-            from db.db_client import is_available as db_available, save_prediction
-            if db_available():
-                _caller_key = getattr(g, "api_key", None)
-                save_prediction(session_id, session_prob_bot, label, threshold,
-                                scoring_type="session", api_key=_caller_key)
+            _caller_key = getattr(g, "api_key", None)
+            db_manager.save_prediction(
+                session_id, session_prob_bot, label == "bot",
+                threshold=threshold,
+                scoring_type="session",
+                api_key=_caller_key,
+            )
         except Exception as exc:
-            logger.warning("Failed to save session prediction to PostgreSQL: %s", exc)
+            logger.warning("Failed to save session prediction to DB: %s", exc)
 
         response = {
             "success": True,

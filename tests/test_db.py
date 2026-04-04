@@ -147,8 +147,7 @@ def test_prediction_saved_after_score_when_db_available():
     payload = _make_batch()
 
     with mock.patch("backend.app._load_scoring_bundle", return_value=fake_bundle), \
-         mock.patch("db.db_client.is_available", return_value=True) as mock_avail, \
-         mock.patch("db.db_client.save_prediction") as mock_save_pred:
+         mock.patch.object(app_module.db_manager, "save_prediction") as mock_save_pred:
         resp = client.post(
             "/api/score",
             data=json.dumps(payload),
@@ -158,7 +157,10 @@ def test_prediction_saved_after_score_when_db_available():
     assert resp.status_code == 200
     data = json.loads(resp.data)
     assert data["label"] == "bot"
-    mock_save_pred.assert_called_once_with("test-session-1", mock.ANY, "bot", 0.5, source=mock.ANY, api_key=mock.ANY)
+    mock_save_pred.assert_called_once_with(
+        "test-session-1", mock.ANY, True,
+        threshold=0.5, scoring_type="batch", source=mock.ANY, api_key=mock.ANY,
+    )
 
 
 # -------------------------------------------------------------------
