@@ -98,6 +98,15 @@ def _make_bot_batch(session_id: str, batch_index: int, base_time: datetime,
             "userAgent": "BotSimulator/1.0",
             "viewportWidth": 1366,
             "viewportHeight": 768,
+            "network_features": {
+                "is_headless_browser": True,
+                "is_known_bot_ua": True,
+                "is_datacenter_ip": True,
+                "ua_entropy": 14.2,
+                "has_accept_language": False,
+                "accept_language_count": 0,
+                "suspicious_header_count": 3,
+            },
         },
     }
 

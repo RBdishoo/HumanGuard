@@ -40,13 +40,18 @@ class DatasetBuilder:
                 logger.info(f"Processing batch {indx}/{len(signalsDf)}")
 
             batchData = {
-
                 "mouseMoves": row["mouseMoves"],
                 "clicks": row["clicks"],
                 "keys": row["keys"],
             }
 
             feats = self.extractor.extractBatchFeatures(batchData)
+
+            # Merge in network/device features stored in batch metadata
+            nf_raw = row.get("network_features")
+            if not isinstance(nf_raw, dict):
+                nf_raw = {}
+            feats.update(self.extractor.extract_network_features(nf_raw))
             sessionCol = "sessionID"
             if sessionCol not in row.index and "index" in row.index:
                 sessionCol = "index"

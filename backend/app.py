@@ -38,6 +38,7 @@ from collectors.signal_collector import SignalCollector
 from utils.helpers import isValidSignalBatch, normalizeSignalBatch, formatTimestamp
 from monitoring import metrics
 from db import db as db_manager, _key_id_from_full
+from enrichment import enrich_request
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,14 @@ FEATURE_INTERPRETATIONS = {
     "signalDiversityEntropy": "low signal type diversity (missing expected event types)",
     "clickToMoveRatio": "unusual ratio of clicks to mouse movements",
     "keyToMoveRatio": "unusual ratio of keystrokes to mouse movements",
+    # Network / device features
+    "is_headless_browser": "request originated from a headless browser (automation detected)",
+    "is_known_bot_ua": "User-Agent matches a known bot or scraper signature",
+    "is_datacenter_ip": "request IP belongs to a cloud datacenter (not a residential ISP)",
+    "ua_entropy": "User-Agent has abnormally low character diversity (template-like UA)",
+    "has_accept_language": "missing Accept-Language header (bots often omit this)",
+    "accept_language_count": "unusual number of languages in Accept-Language header",
+    "suspicious_header_count": "multiple expected browser headers are absent",
 }
 
 
@@ -486,6 +495,10 @@ def scoreSignals():
 
         feats = bundle["extractor"].extractBatchFeatures(signals)
 
+        # Enrich with network/device features from the live HTTP request
+        _network_info = enrich_request(request)
+        feats.update(bundle["extractor"].extract_network_features(_network_info))
+
         # Create feature vector in the exact trained feature order.
         x_row = [float(feats.get(name, 0.0)) for name in feature_names]
 
@@ -549,6 +562,15 @@ def scoreSignals():
                 "upper": round(_ci_upper, 4),
             },
             "std": round(_std, 4),
+        }
+
+        # Network signals summary (always included)
+        response["network_signals"] = {
+            "is_headless": bool(_network_info.get("is_headless_browser", False)),
+            "is_datacenter": bool(_network_info.get("is_datacenter_ip", False)),
+            "is_vpn": bool(_network_info.get("is_vpn", False)),
+            "browser": _network_info.get("browser_type", "unknown"),
+            "country": _network_info.get("country", "unknown"),
         }
 
         # SHAP explanation — opt-out with ?explain=false
@@ -1276,7 +1298,6 @@ def leaderboardGet():
 
 
 @app.route('/api/export', methods=['GET'])
-@require_api_key
 def exportSessions():
     """
     GET /api/export

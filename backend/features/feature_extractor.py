@@ -507,6 +507,32 @@ class FeatureExtractor:
         late  = _mean_delay(batches[n - cut:])
         return float(abs(late - early))
 
+    def extract_network_features(self, network_dict: dict) -> dict:
+        """
+        Convert a pre-computed network/device enrichment dict to 7 numeric features.
+
+        Arguments:
+            network_dict: output of enrichment.enrich_request() **or** a
+                          metadata sub-dict stored in signals.jsonl by the
+                          seed scripts.  Missing keys default to safe values.
+
+        Returns:
+            Dict with exactly 7 keys:
+              is_headless_browser, is_known_bot_ua, is_datacenter_ip,
+              ua_entropy, has_accept_language, accept_language_count,
+              suspicious_header_count
+        """
+        nd = network_dict or {}
+        return {
+            "is_headless_browser":     float(bool(nd.get("is_headless_browser", False))),
+            "is_known_bot_ua":         float(bool(nd.get("is_known_bot_ua", False))),
+            "is_datacenter_ip":        float(bool(nd.get("is_datacenter_ip", False))),
+            "ua_entropy":              float(nd.get("ua_entropy", 0.0)),
+            "has_accept_language":     float(bool(nd.get("has_accept_language", True))),
+            "accept_language_count":   float(nd.get("accept_language_count", 0)),
+            "suspicious_header_count": float(nd.get("suspicious_header_count", 0)),
+        }
+
     def behavior_consistency_score(self, batches: List[dict]) -> float:
         """
         Cosine similarity between first-half and second-half feature vectors.

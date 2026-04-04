@@ -1,19 +1,19 @@
 [
   {
     "model": "RandomForest",
-    "accuracy": 0.9910846953937593,
-    "precision": 0.9872068230277186,
+    "accuracy": 1.0,
+    "precision": 1.0,
     "recall": 1.0,
-    "f1": 0.9935622317596566,
-    "roc_auc": 0.9999897151085055
+    "f1": 1.0,
+    "roc_auc": 1.0
   },
   {
     "model": "LogisticRegression",
-    "accuracy": 0.9925705794947994,
-    "precision": 0.9893162393162394,
+    "accuracy": 1.0,
+    "precision": 1.0,
     "recall": 1.0,
-    "f1": 0.9946294307196563,
-    "roc_auc": 0.994271315437622
+    "f1": 1.0,
+    "roc_auc": 1.0
   },
   {
     "model": "XGBoost",

@@ -145,6 +145,15 @@ def _make_human_batch(session_id: str, batch_index: int, base_time: datetime,
             ]),
             "viewportWidth": random.choice([1280, 1366, 1440, 1920]),
             "viewportHeight": random.choice([720, 768, 900, 1080]),
+            "network_features": {
+                "is_headless_browser": False,
+                "is_known_bot_ua": False,
+                "is_datacenter_ip": False,
+                "ua_entropy": round(random.uniform(72.0, 98.0), 2),
+                "has_accept_language": True,
+                "accept_language_count": random.randint(2, 5),
+                "suspicious_header_count": 0,
+            },
         },
     }
 

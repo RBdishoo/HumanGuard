@@ -53,6 +53,7 @@ class SignalDataLoader:
                         "userAgent": meta.get("userAgent"),
                         "viewportWidth": vw,
                         "viewportHeight": vh,
+                        "network_features": meta.get("network_features") or {},
                     }
                     data.append(flat)
                 except json.JSONDecodeError as e:
