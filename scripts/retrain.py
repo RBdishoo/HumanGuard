@@ -328,19 +328,24 @@ def main():
                 threshold = float(json.load(f).get("threshold", 0.5))
 
         logger.info("Pushing new model to registry (bucket=%s)…", model_bucket)
-        version = registry.push(xgb_model, scaler, feature_names, threshold, metadata)
-        logger.info("Pushed as %s", version)
+        try:
+            version = registry.push(xgb_model, scaler, feature_names, threshold, metadata)
+            logger.info("Pushed as %s", version)
 
-        if should_promote:
-            registry.promote(version)
-            logger.info("Promoted %s to champion", version)
-            print(f"\n✓ New model {version} promoted to champion")
-            print(f"  Accuracy: {new_acc:.4f} vs previous champion: {champ_acc:.4f}")
-        else:
-            logger.info("New model NOT promoted (accuracy %.4f < threshold %.4f)",
-                        new_acc, champ_acc + args.min_accuracy)
-            print(f"\n— Model pushed as {version} but NOT promoted")
-            print(f"  Accuracy {new_acc:.4f} did not exceed champion {champ_acc:.4f}")
+            if should_promote:
+                registry.promote(version)
+                logger.info("Promoted %s to champion", version)
+                print(f"\n✓ New model {version} promoted to champion")
+                print(f"  Accuracy: {new_acc:.4f} vs previous champion: {champ_acc:.4f}")
+            else:
+                logger.info("New model NOT promoted (accuracy %.4f < threshold %.4f)",
+                            new_acc, champ_acc + args.min_accuracy)
+                print(f"\n— Model pushed as {version} but NOT promoted")
+                print(f"  Accuracy {new_acc:.4f} did not exceed champion {champ_acc:.4f}")
+        except Exception as exc:
+            logger.error("Registry push failed: %s — model trained locally but NOT promoted", exc)
+            print(f"\n✗ Registry push failed: {exc}")
+            should_promote = False
     else:
         print("(Dry run — use --push to push to registry)")
 
