@@ -867,6 +867,77 @@ def getStats():
         app.logger.exception("Error getting stats")
         return jsonify({"error": "internal server error"}), 500
     
+@app.route('/api/data-stats', methods=['GET'])
+@require_api_key(count_usage=False)
+def getDataStats():
+    """GET /api/data-stats — labeled session counts and retrain readiness."""
+    import csv
+
+    LABELS_CSV = Path(__file__).resolve().parent / "data" / "raw" / "labels.csv"
+    SIGNALS_JSONL = Path(__file__).resolve().parent / "data" / "raw" / "signals.jsonl"
+    TARGET = 50
+
+    real_human = 0
+    synthetic_human = 0
+    synthetic_bot = 0
+
+    try:
+        if LABELS_CSV.exists():
+            with open(LABELS_CSV, newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    label = row.get("label", "").strip()
+                    source = row.get("source", None)
+                    if source is not None:
+                        source = source.strip()
+                    is_synthetic = (source is None or source == "" or source.startswith("seed_"))
+                    if label == "human":
+                        if is_synthetic:
+                            synthetic_human += 1
+                        else:
+                            real_human += 1
+                    elif label == "bot":
+                        synthetic_bot += 1
+    except Exception:
+        app.logger.exception("Error reading labels.csv")
+
+    real_human_by_source: dict = {}
+    try:
+        if SIGNALS_JSONL.exists():
+            with open(SIGNALS_JSONL) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        batch = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    src = batch.get("source", None)
+                    if src == "real_human":
+                        utm = batch.get("utm_source") or "unknown"
+                        real_human_by_source[utm] = real_human_by_source.get(utm, 0) + 1
+    except Exception:
+        app.logger.exception("Error reading signals.jsonl")
+
+    total = real_human + synthetic_human + synthetic_bot
+    percent = round(min(real_human / TARGET * 100, 100), 2)
+
+    return jsonify({
+        "total_labeled_sessions": total,
+        "real_human_sessions": real_human,
+        "synthetic_human_sessions": synthetic_human,
+        "synthetic_bot_sessions": synthetic_bot,
+        "real_human_by_source": real_human_by_source,
+        "retrain_readiness": {
+            "sufficient_real_humans": real_human >= TARGET,
+            "target": TARGET,
+            "current": real_human,
+            "percent": percent,
+        },
+    }), 200
+
+
 @app.route('/api/signals', methods=['POST'])
 @require_api_key
 def saveSignals():
