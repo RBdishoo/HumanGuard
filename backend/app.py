@@ -780,6 +780,7 @@ def _session_score_logic(session_id):
                 session_id, session_prob_bot, label == "bot",
                 threshold=threshold,
                 scoring_type="session",
+                source=getattr(g, "api_key", None),
                 api_key=_caller_key,
             )
         except Exception as exc:
