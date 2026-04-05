@@ -1321,6 +1321,58 @@ class DatabaseManager:
         except Exception as exc:
             logger.warning("SQLite mark_sessions_as_trained failed: %s", exc)
 
+    def get_data_stats(self) -> dict | None:
+        """Return labeled session counts from the predictions table.
+
+        Counts distinct sessions by (source, label):
+          - real_human      : source = 'demo',      label = 'human'
+          - synthetic_human : source = 'simulator',  label = 'human'
+          - synthetic_bot   : source = 'simulator',  label = 'bot'
+
+        Returns None on any DB error so callers can fall back to file-based counts.
+        """
+        _sql = (
+            "SELECT source, label, COUNT(DISTINCT session_id) AS cnt "
+            "FROM predictions "
+            "WHERE source IN ('demo', 'simulator') "
+            "GROUP BY source, label"
+        )
+        try:
+            if self._use_postgres:
+                conn = self._pg.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(_sql)
+                    rows = cur.fetchall()
+                finally:
+                    self._pg.release_connection(conn)
+                rows = [{"source": r[0], "label": r[1], "cnt": int(r[2])} for r in rows]
+            else:
+                with self._sqlite_cursor() as cur:
+                    cur.execute(_sql)
+                    rows = [dict(r) for r in cur.fetchall()]
+        except Exception as exc:
+            logger.warning("get_data_stats failed: %s", exc)
+            return None
+
+        real_human = 0
+        synthetic_human = 0
+        synthetic_bot = 0
+        for row in rows:
+            src, lbl, cnt = row["source"], row["label"], row["cnt"]
+            if src == "demo" and lbl == "human":
+                real_human += cnt
+            elif src == "simulator" and lbl == "human":
+                synthetic_human += cnt
+            elif src == "simulator" and lbl == "bot":
+                synthetic_bot += cnt
+
+        return {
+            "real_human": real_human,
+            "synthetic_human": synthetic_human,
+            "synthetic_bot": synthetic_bot,
+        }
+
 
 # Module-level singleton — import this everywhere
 db = DatabaseManager()
