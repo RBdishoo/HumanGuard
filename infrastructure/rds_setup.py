@@ -4,13 +4,23 @@ HumanGuard RDS PostgreSQL Setup — run once at deploy time.
 Creates (or reuses) an RDS PostgreSQL instance and stores the connection
 credentials in AWS Secrets Manager.
 
+Least-privilege network design
+──────────────────────────────
+The RDS instance is placed in a private subnet (PubliclyAccessible=False).
+Port 5432 is opened only to the application/Lambda security group, identified
+by APP_SECURITY_GROUP_ID.  If that variable is not set the script falls back
+to the VPC's primary CIDR block so that only traffic inside the same VPC can
+reach the database.  A 0.0.0.0/0 rule is never created.
+
 Usage:
     python infrastructure/rds_setup.py
 
 Environment variables:
-    AWS_REGION         — defaults to us-east-1
-    AWS_ACCOUNT_ID     — defaults to 796793347388
-    DB_PASSWORD        — master password (required; never hard-coded)
+    AWS_REGION              — defaults to us-east-1
+    DB_PASSWORD             — master password (required; never hard-coded)
+    APP_SECURITY_GROUP_ID   — SG attached to the Lambda / app tier; when set,
+                              ingress on 5432 is restricted to that SG only.
+                              If omitted, falls back to the default VPC CIDR.
 """
 
 import json
@@ -22,13 +32,20 @@ import boto3
 from botocore.exceptions import ClientError
 
 REGION = os.environ.get("AWS_REGION", "us-east-1")
-ACCOUNT_ID = os.environ.get("AWS_ACCOUNT_ID", "796793347388")
 DB_INSTANCE_ID = "humanguard-db"
 DB_NAME = "humanguard"
 DB_USERNAME = "humanguard_admin"
 DB_PASSWORD = os.environ.get("DB_PASSWORD", "")
 SECRET_NAME = "humanGuard/rds"
-SG_NAME = "humanguard-rds-sg"
+
+# Name of the security group attached to the RDS instance (DB tier).
+DB_SG_NAME = "humanguard-rds-sg"
+
+# Security group ID of the Lambda / application tier.
+# When set, port 5432 is opened *only* to this SG — the tightest possible
+# scope.  If not set the script falls back to the VPC CIDR (still private).
+# Set via:  export APP_SECURITY_GROUP_ID=sg-xxxxxxxx
+APP_SG_ID = os.environ.get("APP_SECURITY_GROUP_ID", "")
 
 ec2 = boto3.client("ec2", region_name=REGION)
 rds = boto3.client("rds", region_name=REGION)
@@ -37,40 +54,87 @@ sm = boto3.client("secretsmanager", region_name=REGION)
 
 # ── Security Group ────────────────────────────────────────────────────────────
 
-def get_or_create_security_group() -> str:
-    """Return the security group ID that allows inbound PostgreSQL (5432)."""
-    # Check if it already exists
-    resp = ec2.describe_security_groups(
-        Filters=[{"Name": "group-name", "Values": [SG_NAME]}]
-    )
-    if resp["SecurityGroups"]:
-        sg_id = resp["SecurityGroups"][0]["GroupId"]
-        print(f"Security group already exists: {sg_id}")
-        return sg_id
+def _build_postgres_ingress_rule() -> dict:
+    """
+    Return the least-privilege IpPermissions entry for port 5432.
 
-    # Create a new security group in the default VPC
-    vpcs = ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])
-    vpc_id = vpcs["Vpcs"][0]["VpcId"]
+    Priority:
+      1. APP_SECURITY_GROUP_ID set → allow only that SG (Lambda / app tier).
+      2. Fallback → restrict to the VPC CIDR so no public Internet path exists.
 
-    sg = ec2.create_security_group(
-        GroupName=SG_NAME,
-        Description="HumanGuard RDS PostgreSQL access",
-        VpcId=vpc_id,
-    )
-    sg_id = sg["GroupId"]
-    print(f"Security group created: {sg_id}")
-
-    # Allow inbound PostgreSQL from anywhere (restrict in production)
-    ec2.authorize_security_group_ingress(
-        GroupId=sg_id,
-        IpPermissions=[{
+    A 0.0.0.0/0 source is never used.
+    """
+    if APP_SG_ID:
+        print(f"Restricting port 5432 to app/Lambda security group: {APP_SG_ID}")
+        return {
             "IpProtocol": "tcp",
             "FromPort": 5432,
             "ToPort": 5432,
-            "IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "PostgreSQL"}],
-        }],
+            "UserIdGroupPairs": [{
+                "GroupId": APP_SG_ID,
+                "Description": "PostgreSQL from Lambda/app security group only",
+            }],
+        }
+
+    # APP_SECURITY_GROUP_ID was not supplied — fall back to the VPC CIDR.
+    # This keeps the database unreachable from the public Internet while still
+    # allowing intra-VPC connectivity.  Set APP_SECURITY_GROUP_ID to tighten
+    # the scope to the exact Lambda SG once it is known.
+    vpcs = ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])
+    vpc_cidr = vpcs["Vpcs"][0]["CidrBlock"]
+    print(
+        f"APP_SECURITY_GROUP_ID not set — restricting port 5432 to VPC CIDR "
+        f"{vpc_cidr}.  Set APP_SECURITY_GROUP_ID to further limit access to "
+        "the Lambda/app SG only."
     )
-    print("Inbound rule for port 5432 added.")
+    return {
+        "IpProtocol": "tcp",
+        "FromPort": 5432,
+        "ToPort": 5432,
+        "IpRanges": [{
+            "CidrIp": vpc_cidr,
+            "Description": (
+                "PostgreSQL — VPC-internal only; no public Internet access. "
+                "Set APP_SECURITY_GROUP_ID to scope to the Lambda SG."
+            ),
+        }],
+    }
+
+
+def get_or_create_security_group() -> str:
+    """
+    Return the ID of the RDS security group, creating it when necessary.
+
+    The group is scoped to the default VPC and allows port 5432 only from
+    the least-privilege source determined by _build_postgres_ingress_rule().
+    """
+    vpcs = ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])
+    vpc_id = vpcs["Vpcs"][0]["VpcId"]
+
+    resp = ec2.describe_security_groups(
+        Filters=[
+            {"Name": "group-name", "Values": [DB_SG_NAME]},
+            {"Name": "vpc-id",     "Values": [vpc_id]},
+        ]
+    )
+    if resp["SecurityGroups"]:
+        sg_id = resp["SecurityGroups"][0]["GroupId"]
+        print(f"DB security group already exists: {sg_id}")
+        return sg_id
+
+    sg = ec2.create_security_group(
+        GroupName=DB_SG_NAME,
+        Description="HumanGuard RDS — allows PostgreSQL only from the app/Lambda tier",
+        VpcId=vpc_id,
+    )
+    sg_id = sg["GroupId"]
+    print(f"DB security group created: {sg_id}")
+
+    ec2.authorize_security_group_ingress(
+        GroupId=sg_id,
+        IpPermissions=[_build_postgres_ingress_rule()],
+    )
+    print("Inbound rule for port 5432 added (no public Internet access).")
     return sg_id
 
 
@@ -102,7 +166,7 @@ def get_or_create_rds(sg_id: str) -> dict:
         DBName=DB_NAME,
         AllocatedStorage=20,
         StorageType="gp2",
-        PubliclyAccessible=True,
+        PubliclyAccessible=False,   # keep the instance in a private subnet
         VpcSecurityGroupIds=[sg_id],
         BackupRetentionPeriod=0,
         MultiAZ=False,
