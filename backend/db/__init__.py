@@ -2,11 +2,15 @@
 DatabaseManager for HumanGuard.
 
 Provides a unified interface over SQLite (dev/test) and PostgreSQL (production).
-Backend is chosen at instantiation based on DATABASE_URL:
+Backend is chosen at instantiation using this priority order:
 
-  - Starts with "postgres" → PostgreSQL via db_client connection pool
-  - Starts with "sqlite:///" → SQLite at the specified path (":memory:" supported)
-  - Empty / anything else  → SQLite at backend/data/humanguard.db
+  1. DATABASE_URL starts with "postgres" → PostgreSQL (local dev override)
+  2. RDS_SECRET_NAME is set             → PostgreSQL (production; db_client
+                                          resolves credentials from Secrets
+                                          Manager at cold-start)
+  3. DATABASE_URL starts with "sqlite:///" → SQLite at the specified path
+                                             (":memory:" supported — used by tests)
+  4. Nothing set                        → SQLite at backend/data/humanguard.db
 
 Gracefully degrades: every public method silently returns empty/zero values on
 failure so the JSONL path continues working uninterrupted.
@@ -133,8 +137,18 @@ class DatabaseManager:
     """Unified DB manager with automatic SQLite/PostgreSQL selection."""
 
     def __init__(self):
-        self._db_url = os.environ.get("DATABASE_URL", "")
-        self._use_postgres = self._db_url.startswith("postgres")
+        db_url = os.environ.get("DATABASE_URL", "")
+        # PostgreSQL mode when:
+        #   (a) DATABASE_URL is an explicit postgres:// URL (local dev override), or
+        #   (b) RDS_SECRET_NAME is set AND DATABASE_URL is not a sqlite:// override —
+        #       production path where db_client resolves credentials from Secrets
+        #       Manager at cold-start (DATABASE_URL absent on Lambda).
+        # An explicit sqlite:/// value always wins so tests are never affected.
+        self._use_postgres = db_url.startswith("postgres") or (
+            bool(os.environ.get("RDS_SECRET_NAME"))
+            and not db_url.startswith("sqlite")
+        )
+        self._db_url = db_url  # retained only for sqlite:/// path extraction below
         self._sqlite_path = None
         self._sqlite_mem_conn = None  # persistent connection for ":memory:"
         self._pg = None
@@ -149,8 +163,8 @@ class DatabaseManager:
                 self._use_postgres = False
 
         if not self._use_postgres:
-            if self._db_url.startswith("sqlite:///"):
-                raw_path = self._db_url[len("sqlite:///"):]
+            if db_url.startswith("sqlite:///"):
+                raw_path = db_url[len("sqlite:///"):]
                 self._sqlite_path = ":memory:" if raw_path == ":memory:" else raw_path
             else:
                 data_dir = Path(__file__).resolve().parent.parent / "data"

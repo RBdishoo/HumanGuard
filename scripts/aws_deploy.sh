@@ -25,7 +25,11 @@ ROLE_NAME=humanguard-lambda-role
 IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$REPO_NAME:latest
 API_NAME=humanguard-api
 CLOUDWATCH_ENABLED=true
-SNS_ALERT_EMAIL=${SNS_ALERT_EMAIL:-"rbdishoo@gmail.com"}
+SNS_ALERT_EMAIL=${SNS_ALERT_EMAIL:-""}
+if [ -z "$SNS_ALERT_EMAIL" ]; then
+  echo "Error: SNS_ALERT_EMAIL env var is required (e.g. export SNS_ALERT_EMAIL=you@example.com)"
+  exit 1
+fi
 SENDER_EMAIL=${SENDER_EMAIL:-"noreply@humanguard.net"}
 DB_MAX_CONNECTIONS=5
 ALLOWED_ORIGINS_PROD="https://humanguard.net,https://www.humanguard.net,https://d1hi33wespusty.cloudfront.net"
@@ -47,7 +51,7 @@ if [ -z "$HUMANGUARD_MASTER_KEY" ]; then
         --secret-string "{\"key\":\"$HUMANGUARD_MASTER_KEY\"}" \
         --region "$AWS_REGION" > /dev/null
     echo "New master key generated and stored in Secrets Manager as humanGuard/masterKey."
-    echo "  HUMANGUARD_MASTER_KEY: $HUMANGUARD_MASTER_KEY"
+    echo "  (key value not printed — retrieve from Secrets Manager: humanGuard/masterKey)"
   fi
 fi
 
@@ -79,22 +83,15 @@ if [ -n "$FRONTEND_S3_BUCKET" ]; then
     ALLOWED_ORIGINS_PROD="$ALLOWED_ORIGINS_PROD,http://$FRONTEND_S3_BUCKET.s3-website-$AWS_REGION.amazonaws.com"
 fi
 
-# Fetch DATABASE_URL from Secrets Manager (set to empty if secret not yet created)
-DATABASE_URL=""
-if SECRET_JSON=$(aws secretsmanager get-secret-value \
-        --secret-id "humanGuard/rds" \
-        --region "$AWS_REGION" \
-        --query "SecretString" \
-        --output text 2>/dev/null); then
-    DB_HOST=$(echo "$SECRET_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['host'])")
-    DB_PORT=$(echo "$SECRET_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['port'])")
-    DB_NAME=$(echo "$SECRET_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['dbname'])")
-    DB_USER=$(echo "$SECRET_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['username'])")
-    DB_PASS=$(echo "$SECRET_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['password'])")
-    DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
-    echo "DATABASE_URL loaded from Secrets Manager."
+# Verify the RDS secret exists; Lambda fetches credentials at runtime via Secrets Manager.
+# The plaintext DATABASE_URL is never assembled here or passed to Lambda env vars.
+RDS_SECRET_NAME="humanGuard/rds"
+if aws secretsmanager describe-secret \
+        --secret-id "$RDS_SECRET_NAME" \
+        --region "$AWS_REGION" > /dev/null 2>&1; then
+    echo "Secrets Manager: '$RDS_SECRET_NAME' found — Lambda will fetch credentials at runtime."
 else
-    echo "Warning: humanGuard/rds secret not found — Lambda will run without PostgreSQL."
+    echo "Warning: '$RDS_SECRET_NAME' not found in Secrets Manager — Lambda will run without PostgreSQL."
 fi
 
 echo "=== HumanGuard AWS Deployment ==="
@@ -177,41 +174,88 @@ aws iam create-role \
 ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${ROLE_NAME}"
 
 # ---------------------------------------------------------------
-# STEP 5: Attach execution policy to role
-# Grants the Lambda function permission to write CloudWatch logs.
-# attach-role-policy is idempotent — safe to run repeatedly.
+# STEP 5: Apply scoped inline policy to IAM role
+#
+# Uses put-role-policy (inline, not managed) so every permission is
+# version-controlled here and cannot silently expand via an AWS-managed
+# policy update.  put-role-policy is idempotent — safe to run repeatedly.
+#
+# Grants only what the function actually needs:
+#   - CloudWatch Logs  : CreateLogGroup/Stream/PutLogEvents for this function
+#   - CloudWatch Metrics: PutMetricData scoped to the HumanGuard namespace
+#   - Secrets Manager  : GetSecretValue for humanGuard/* secrets only
+#   - SNS              : Publish to the HumanGuard-Alerts topic only
+#   - SES              : SendEmail / SendRawEmail (no identity-level restriction
+#                        possible without a verified identity ARN at deploy time)
+#   - S3               : GetObject/PutObject/ListBucket on humanguard-models only
 # ---------------------------------------------------------------
 echo ""
-echo "--- Step 5: Attach execution policy to role ---"
+echo "--- Step 5: Apply scoped inline IAM policy to role ---"
 
-# Attach the AWS-managed basic execution policy for CloudWatch Logs access
-aws iam attach-role-policy \
-    --role-name "$ROLE_NAME" \
-    --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-echo "AWSLambdaBasicExecutionRole attached to '$ROLE_NAME'."
-
-# Grant Lambda permission to send emails via SES
-SES_POLICY_NAME="humanguard-ses-send"
-SES_POLICY_DOC='{
-  "Version": "2012-10-17",
-  "Statement": [
+INLINE_POLICY_NAME="humanguard-lambda-policy"
+INLINE_POLICY_DOC=$(env \
+    _ACCT="$AWS_ACCOUNT_ID" \
+    _REGION="$AWS_REGION" \
+    _FN="$FUNCTION_NAME" \
+    python3 -c "
+import json, os
+acct   = os.environ['_ACCT']
+region = os.environ['_REGION']
+fn     = os.environ['_FN']
+print(json.dumps({
+  'Version': '2012-10-17',
+  'Statement': [
     {
-      "Effect": "Allow",
-      "Action": [
-        "ses:SendEmail",
-        "ses:SendRawEmail"
-      ],
-      "Resource": "*"
+      'Sid': 'CloudWatchLogs',
+      'Effect': 'Allow',
+      'Action': ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
+      'Resource': [
+        f'arn:aws:logs:{region}:{acct}:log-group:/aws/lambda/{fn}',
+        f'arn:aws:logs:{region}:{acct}:log-group:/aws/lambda/{fn}:*'
+      ]
+    },
+    {
+      'Sid': 'CloudWatchMetrics',
+      'Effect': 'Allow',
+      'Action': ['cloudwatch:PutMetricData'],
+      'Resource': '*',
+      'Condition': {'StringEquals': {'cloudwatch:namespace': 'HumanGuard'}}
+    },
+    {
+      'Sid': 'SecretsManager',
+      'Effect': 'Allow',
+      'Action': ['secretsmanager:GetSecretValue'],
+      'Resource': f'arn:aws:secretsmanager:{region}:{acct}:secret:humanGuard/*'
+    },
+    {
+      'Sid': 'SNSPublish',
+      'Effect': 'Allow',
+      'Action': ['sns:Publish'],
+      'Resource': f'arn:aws:sns:{region}:{acct}:HumanGuard-Alerts'
+    },
+    {
+      'Sid': 'SES',
+      'Effect': 'Allow',
+      'Action': ['ses:SendEmail', 'ses:SendRawEmail'],
+      'Resource': '*'
+    },
+    {
+      'Sid': 'S3ModelRegistry',
+      'Effect': 'Allow',
+      'Action': ['s3:GetObject', 's3:PutObject', 's3:ListBucket'],
+      'Resource': [
+        'arn:aws:s3:::humanguard-models',
+        'arn:aws:s3:::humanguard-models/*'
+      ]
     }
   ]
-}'
+}))")
+
 aws iam put-role-policy \
     --role-name "$ROLE_NAME" \
-    --policy-name "$SES_POLICY_NAME" \
-    --policy-document "$SES_POLICY_DOC" \
-    2>/dev/null \
-    && echo "SES send policy '$SES_POLICY_NAME' attached to '$ROLE_NAME'." \
-    || echo "SES send policy already exists or attachment failed — continuing."
+    --policy-name "$INLINE_POLICY_NAME" \
+    --policy-document "$INLINE_POLICY_DOC"
+echo "Scoped inline policy '$INLINE_POLICY_NAME' applied to '$ROLE_NAME'."
 
 # Allow IAM role to propagate before Lambda creation
 echo "Waiting 10 seconds for IAM role propagation..."
@@ -226,11 +270,14 @@ echo ""
 echo "--- Step 6: Create or update Lambda function ---"
 
 # Build env JSON via python3 so commas inside ALLOWED_ORIGINS don't break parsing.
+# DATABASE_URL is intentionally absent — db_client.py fetches credentials from
+# Secrets Manager at cold-start using RDS_SECRET_NAME, keeping the plaintext
+# password out of the Lambda console, CloudTrail, and environment variable logs.
 ENV_VARS=$(env \
     _PORT="8080" \
     _CW="$CLOUDWATCH_ENABLED" \
     _SNS="$SNS_ALERT_EMAIL" \
-    _DB="$DATABASE_URL" \
+    _RDS_SECRET="$RDS_SECRET_NAME" \
     _DBMAX="$DB_MAX_CONNECTIONS" \
     _MK="$HUMANGUARD_MASTER_KEY" \
     _EK="$EXPORT_API_KEY" \
@@ -242,7 +289,7 @@ print(json.dumps({'Variables': {
     'PORT':                 os.environ['_PORT'],
     'CLOUDWATCH_ENABLED':   os.environ['_CW'],
     'SNS_ALERT_EMAIL':      os.environ['_SNS'],
-    'DATABASE_URL':         os.environ['_DB'],
+    'RDS_SECRET_NAME':      os.environ['_RDS_SECRET'],
     'DB_MAX_CONNECTIONS':   os.environ['_DBMAX'],
     'HUMANGUARD_MASTER_KEY':os.environ['_MK'],
     'EXPORT_API_KEY':       os.environ['_EK'],
@@ -456,10 +503,10 @@ fi
 #     --region "$AWS_REGION"
 # echo "ECR repository '$REPO_NAME' deleted."
 
-# # Detach policy and delete IAM role
-# aws iam detach-role-policy \
+# # Delete inline policy, then delete IAM role
+# aws iam delete-role-policy \
 #     --role-name "$ROLE_NAME" \
-#     --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+#     --policy-name "humanguard-lambda-policy"
 # aws iam delete-role \
 #     --role-name "$ROLE_NAME"
 # echo "IAM role '$ROLE_NAME' deleted."

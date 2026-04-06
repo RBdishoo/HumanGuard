@@ -82,11 +82,21 @@ def _build_postgres_ingress_rule() -> dict:
     # the scope to the exact Lambda SG once it is known.
     vpcs = ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])
     vpc_cidr = vpcs["Vpcs"][0]["CidrBlock"]
-    print(
-        f"APP_SECURITY_GROUP_ID not set — restricting port 5432 to VPC CIDR "
-        f"{vpc_cidr}.  Set APP_SECURITY_GROUP_ID to further limit access to "
-        "the Lambda/app SG only."
-    )
+    print("=" * 65)
+    print("WARNING: APP_SECURITY_GROUP_ID is not set.")
+    print()
+    print("  Port 5432 will be open to the entire VPC CIDR:")
+    print(f"    {vpc_cidr}")
+    print()
+    print("  This means any resource in the same VPC can reach the DB,")
+    print("  not just the Lambda/app tier. This is still private —")
+    print("  no public Internet access is created — but it is less")
+    print("  restrictive than scoping to the Lambda security group.")
+    print()
+    print("  To tighten this, rerun after setting:")
+    print("    export APP_SECURITY_GROUP_ID=sg-xxxxxxxx")
+    print("  (use the SG attached to the Lambda function)")
+    print("=" * 65)
     return {
         "IpProtocol": "tcp",
         "FromPort": 5432,
@@ -219,8 +229,9 @@ def store_secret(instance: dict):
         print(f"Secret '{SECRET_NAME}' created.")
 
     database_url = f"postgresql://{DB_USERNAME}:{DB_PASSWORD}@{host}:{port}/{DB_NAME}"
-    print(f"\nDATABASE_URL (set this on Lambda):")
-    print(f"  {database_url}")
+    print(f"\nCredentials stored in Secrets Manager as '{SECRET_NAME}'.")
+    print("Lambda will fetch them at cold-start via RDS_SECRET_NAME — do NOT")
+    print("pass DATABASE_URL as a Lambda environment variable.")
     return database_url
 
 
@@ -434,9 +445,10 @@ if __name__ == "__main__":
 
     print("\n=== Setup complete ===")
     print("Next steps:")
-    print("  1. Set DATABASE_URL on Lambda:")
-    print(f"     aws lambda update-function-configuration \\")
-    print(f"       --function-name humanguard \\")
-    print(f"       --environment Variables={{DATABASE_URL={database_url},CLOUDWATCH_ENABLED=true}}")
-    print("  2. Run migrations: DATABASE_URL=... python -m backend.db.migrate")
-    print("  3. Run column migration: DATABASE_URL=... python infrastructure/rds_setup.py --migrate-only")
+    print("  1. Deploy Lambda via scripts/aws_deploy.sh — it sets RDS_SECRET_NAME")
+    print("     as a Lambda env var; db_client.py fetches credentials at cold-start.")
+    print("     Do NOT set DATABASE_URL on Lambda.")
+    print("  2. Run schema migration (uses DATABASE_URL locally for migration only):")
+    print(f"     DATABASE_URL='{database_url}' python -m backend.db.migrate")
+    print("  3. Run column migration:")
+    print(f"     DATABASE_URL='{database_url}' python infrastructure/rds_setup.py --migrate-only")

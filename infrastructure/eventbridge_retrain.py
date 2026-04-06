@@ -39,10 +39,9 @@ IMAGE_URI       = f"{ACCOUNT_ID}.dkr.ecr.{REGION}.amazonaws.com/{ECR_REPO_NAME}:
 # Lambda CMD override — invokes the retrain_lambda handler instead of the Flask app
 LAMBDA_CMD      = ["python", "scripts/retrain_lambda.py"]
 
-iam      = boto3.client("iam",           region_name=REGION)
-lam      = boto3.client("lambda",        region_name=REGION)
-events   = boto3.client("events",        region_name=REGION)
-sm       = boto3.client("secretsmanager", region_name=REGION)
+iam      = boto3.client("iam",    region_name=REGION)
+lam      = boto3.client("lambda", region_name=REGION)
+events   = boto3.client("events", region_name=REGION)
 
 
 # ── IAM Role ──────────────────────────────────────────────────────────────────
@@ -90,32 +89,24 @@ def get_or_create_role() -> str:
 # ── Lambda Function ───────────────────────────────────────────────────────────
 
 def _env_vars() -> dict:
-    """Build environment variable dict for the retrain Lambda."""
+    """Build environment variable dict for the retrain Lambda.
+
+    DATABASE_URL is intentionally absent.  db_client.py resolves PostgreSQL
+    credentials at cold-start via RDS_SECRET_NAME → Secrets Manager, so the
+    plaintext password never appears in Lambda environment variables or CloudTrail.
+    """
     env = {
         "PYTHONPATH": "/var/task",
         "SNS_ALERT_TOPIC": f"arn:aws:sns:{REGION}:{ACCOUNT_ID}:HumanGuard-Alerts",
+        # Secret name only — credentials fetched at runtime by db_client
+        "RDS_SECRET_NAME": "humanGuard/rds",
     }
 
-    # Inherit DATABASE_URL and other secrets from the main function if set
-    for key in ("DATABASE_URL", "HUMANGUARD_MASTER_KEY", "EXPORT_API_KEY", "MODEL_BUCKET", "API_URL"):
+    # Inherit non-sensitive runtime config from the calling environment if set
+    for key in ("HUMANGUARD_MASTER_KEY", "EXPORT_API_KEY", "MODEL_BUCKET", "API_URL"):
         val = os.environ.get(key, "")
         if val:
             env[key] = val
-
-    # Try to fetch DATABASE_URL from Secrets Manager
-    if "DATABASE_URL" not in env:
-        try:
-            secret_json = sm.get_secret_value(
-                SecretId="humanGuard/rds", Region=REGION
-            )["SecretString"]
-            d = json.loads(secret_json)
-            env["DATABASE_URL"] = (
-                f"postgresql://{d['username']}:{d['password']}"
-                f"@{d['host']}:{d['port']}/{d['dbname']}"
-            )
-            print("DATABASE_URL loaded from Secrets Manager.")
-        except Exception:
-            pass
 
     return env
 

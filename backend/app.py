@@ -26,9 +26,11 @@ import sys
 import json
 import time
 import threading
+import ipaddress
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from pathlib import Path
 
 # Add parent Directory to path so we can import backend modules
@@ -357,6 +359,30 @@ def _log_prediction_local(session_id, prob_bot, label, threshold,
             f.write(json.dumps(entry) + "\n")
     except Exception as exc:
         logger.warning("Failed to write prediction log: %s", exc)
+
+
+def _is_safe_webhook_url(url: str) -> bool:
+    """Return False if the URL targets a private/loopback/link-local address (SSRF guard)."""
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        # Block known local hostname strings regardless of IP resolution
+        if hostname.lower() in ("localhost", "localhost.localdomain"):
+            return False
+        # If the hostname is a bare IP, check its classification
+        try:
+            addr = ipaddress.ip_address(hostname)
+            if (addr.is_private or addr.is_loopback
+                    or addr.is_link_local or addr.is_reserved
+                    or addr.is_unspecified or addr.is_multicast):
+                return False
+        except ValueError:
+            pass  # It's a domain name; DNS-rebinding risk is accepted at this layer
+    except Exception:
+        return False
+    return True
 
 
 def _deliver_webhook(webhook: dict, payload_bytes: bytes):
@@ -1654,6 +1680,8 @@ def registerWebhook():
 
     if not url or not url.startswith(("http://", "https://")):
         return jsonify({"error": "url must be a valid http/https URL"}), 400
+    if not _is_safe_webhook_url(url):
+        return jsonify({"error": "webhook URL cannot target internal or reserved addresses"}), 400
     if not secret:
         return jsonify({"error": "secret is required"}), 400
     if not events or not isinstance(events, list):

@@ -1,8 +1,11 @@
 """
 One-time migration: JSONL + labels.csv → PostgreSQL.
 
-Usage:
-    DATABASE_URL=postgres://... python -m backend.db.migrate
+Usage (local dev — pass URL directly):
+    DATABASE_URL=postgres://user:pass@host/db python -m backend.db.migrate
+
+Usage (resolve from Secrets Manager — same as production):
+    RDS_SECRET_NAME=humanGuard/rds python -m backend.db.migrate
 
 Safe to re-run — uses ON CONFLICT DO NOTHING for all inserts.
 """
@@ -24,7 +27,8 @@ LABELS_FILE = DATA_DIR / "labels.csv"
 
 def migrate():
     if not db_client.is_available():
-        print("ERROR: DATABASE_URL is not set or connection failed.")
+        print("ERROR: could not connect to PostgreSQL.")
+        print("  Set DATABASE_URL=postgres://... or RDS_SECRET_NAME=humanGuard/rds")
         sys.exit(1)
 
     sessions_migrated = set()

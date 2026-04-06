@@ -1,9 +1,14 @@
 """
 PostgreSQL client for HumanGuard.
 
-Reads DATABASE_URL from env. When the var is missing or the connection
-fails, every public function degrades gracefully so the JSONL path
-keeps working.
+Connection URL resolution order:
+  1. DATABASE_URL env var — used as-is (local dev / explicit override).
+  2. RDS_SECRET_NAME env var — fetched from AWS Secrets Manager at cold-start
+     and cached for the container lifetime so Secrets Manager is never called
+     more than once per Lambda instance.
+
+When neither is set, or the connection fails, every public function degrades
+gracefully so the JSONL path keeps working.
 """
 
 import os
@@ -14,6 +19,58 @@ logger = logging.getLogger(__name__)
 
 _pool = None
 _available = None  # tri-state: None = not checked, True/False = result
+_database_url = None  # resolved once per cold start; never stored in env
+
+
+def _resolve_database_url() -> str:
+    """
+    Return the PostgreSQL DSN, resolving credentials exactly once per
+    Lambda container lifetime.
+
+    Fast path  — DATABASE_URL is set in the environment (local dev or an
+                 explicit override).  Used without touching Secrets Manager.
+
+    Cold-start — RDS_SECRET_NAME names a Secrets Manager secret whose JSON
+                 payload contains {host, port, dbname, username, password}.
+                 The assembled URL is cached in _database_url so subsequent
+                 calls within the same container are instant.
+    """
+    global _database_url
+    if _database_url is not None:
+        return _database_url
+
+    # Fast path: explicit DATABASE_URL (local dev)
+    url = os.environ.get("DATABASE_URL")
+    if url:
+        _database_url = url
+        return _database_url
+
+    # Cold-start path: fetch from Secrets Manager
+    secret_name = os.environ.get("RDS_SECRET_NAME")
+    if not secret_name:
+        raise RuntimeError(
+            "Neither DATABASE_URL nor RDS_SECRET_NAME is set — "
+            "cannot connect to PostgreSQL"
+        )
+
+    import boto3
+    region = os.environ.get("AWS_REGION", "us-east-1")
+    sm = boto3.client("secretsmanager", region_name=region)
+    try:
+        resp = sm.get_secret_value(SecretId=secret_name)
+        secret = json.loads(resp["SecretString"])
+        _database_url = (
+            f"postgresql://{secret['username']}:{secret['password']}"
+            f"@{secret['host']}:{secret['port']}/{secret['dbname']}"
+        )
+        logger.info("DB credentials fetched from Secrets Manager: %s", secret_name)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to fetch DB credentials from Secrets Manager "
+            f"(secret='{secret_name}'): {exc}"
+        ) from exc
+
+    return _database_url
 
 
 def _get_pool():
@@ -22,25 +79,22 @@ def _get_pool():
     if _pool is not None:
         return _pool
 
-    database_url = os.environ.get("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL is not set")
-
     import psycopg2
     from psycopg2.pool import SimpleConnectionPool
 
-    _pool = SimpleConnectionPool(minconn=1, maxconn=5, dsn=database_url)
+    _pool = SimpleConnectionPool(minconn=1, maxconn=5, dsn=_resolve_database_url())
     return _pool
 
 
 def is_available():
-    """Return True if DATABASE_URL is set and a connection succeeds."""
+    """Return True if a database URL can be resolved and a connection succeeds."""
     global _available
     if _available is not None:
         return _available
 
-    database_url = os.environ.get("DATABASE_URL")
-    if not database_url:
+    try:
+        _resolve_database_url()
+    except RuntimeError:
         _available = False
         return False
 
@@ -162,6 +216,7 @@ def save_prediction(session_id, prob_bot, label, threshold, scoring_type="batch"
 
 def reset():
     """Reset cached state (for testing)."""
-    global _pool, _available
+    global _pool, _available, _database_url
     _pool = None
     _available = None
+    _database_url = None

@@ -112,13 +112,14 @@ Extracted features: backend/data/processed/training_data_batches.csv
 .gitignore excludes data/raw/*.jsonl, models/*.pkl, .env
 
 ### Database
-- Local dev: JSONL + CSV (no DATABASE_URL needed)
-- Production: PostgreSQL via DATABASE_URL env var (AWS RDS)
+- Local dev: JSONL + CSV (no DATABASE_URL needed; SQLite auto-selected)
+- Production: PostgreSQL via `RDS_SECRET_NAME=humanGuard/rds` Lambda env var; `db_client.py` fetches credentials from Secrets Manager at cold-start and caches them — `DATABASE_URL` is never stored in Lambda env vars
+- `DATABASE_URL` is still accepted as a local dev override (e.g. `DATABASE_URL=postgres://...` or `DATABASE_URL=sqlite:///...` for tests)
 - Dual-write: JSONL always written first; PostgreSQL written if available
 - Schema: `backend/db/schema.sql` (sessions, signal_batches, labels, predictions)
 - Predictions table includes `scoring_type` column ('batch' or 'session')
-- Client: `backend/db/db_client.py` — connection pool, is_available() guard
-- To run migration: `python -m backend.db.migrate`
+- Client: `backend/db/db_client.py` — connection pool, `is_available()` guard, `_resolve_database_url()` handles both `DATABASE_URL` and `RDS_SECRET_NAME`
+- To run migration: `DATABASE_URL=postgres://... python -m backend.db.migrate` (or `RDS_SECRET_NAME=humanGuard/rds`)
 
 ### Phase 6 Progress
 Completed:

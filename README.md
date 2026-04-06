@@ -42,7 +42,7 @@ A second-layer **temporal session blender** catches adaptive bots that behave hu
 **Option 2 — Score a batch directly:**
 
 ```bash
-curl -X POST https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com/api/score \
+curl -X POST https://humanguard.net/api/score \
   -H "Content-Type: application/json" \
   -H "X-API-Key: hg_live_xxxxxxxx.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
   -d '{
@@ -50,7 +50,7 @@ curl -X POST https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com/api/score \
     "signals": {
       "mouseMoves": [{"x": 412, "y": 308, "ts": 1000}, {"x": 428, "y": 315, "ts": 1087}],
       "clicks":    [{"x": 441, "y": 323, "ts": 1450, "button": 0}],
-      "keys":      [{"key": "h", "ts": 1520}, {"key": "e", "ts": 1634}]
+      "keys":      [{"code": "KeyH", "ts": 1520}, {"code": "KeyE", "ts": 1634}]
     }
   }'
 ```
@@ -272,7 +272,7 @@ python -m backend.app
 pytest tests/ -v
 ```
 
-The server auto-detects the absence of `DATABASE_URL` and falls back to a local SQLite file at `backend/data/humanguard.db`. CloudWatch metrics are no-ops unless `CLOUDWATCH_ENABLED=true` is set. The email service logs verification links to stdout when `SENDER_EMAIL` is unset.
+The server auto-selects its database backend: set `DATABASE_URL=postgres://...` to use PostgreSQL locally, or set `RDS_SECRET_NAME=humanGuard/rds` to resolve credentials from AWS Secrets Manager (production path). With neither set, it falls back to a local SQLite file at `backend/data/humanguard.db`. CloudWatch metrics are no-ops unless `CLOUDWATCH_ENABLED=true` is set. The email service logs verification links to stdout when `SENDER_EMAIL` is unset.
 
 ---
 
@@ -392,7 +392,7 @@ pytest tests/ -v
 | Dashboard | https://humanguard.net/dashboard.html |
 | Register | https://humanguard.net/register.html |
 | SDK | https://humanguard.net/sdk/humanGuard.min.js |
-| Lambda API | https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com |
+| API | https://humanguard.net |
 
 ---
 

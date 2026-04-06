@@ -49,7 +49,6 @@ document.addEventListener("click", (e) => {
 //Collect key presses
 document.addEventListener("keydown", (e) =>{
     signalsBuffer.keys.push({
-        key: e.key,
         code: e.code,
         ts: Date.now(),
     });

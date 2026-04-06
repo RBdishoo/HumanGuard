@@ -13,7 +13,7 @@
 | Database | ✅ Complete | RDS PostgreSQL in production; SQLite auto-fallback for local dev |
 | Monitoring | ✅ Complete | 5 CloudWatch metrics, 4 alarms, SNS email alerts active |
 | Dashboard | ✅ Complete | S3-hosted, polls `/api/dashboard-stats`, live chart + SHAP bars |
-| CloudFront | ✅ Complete | HTTPS distribution `E3F5RTWRNWWQB0`; custom domain `humanguard.net`; HTTP→HTTPS redirect; tuned cache TTLs |
+| CloudFront | ✅ Complete | HTTPS distribution; custom domain `humanguard.net`; HTTP→HTTPS redirect; tuned cache TTLs |
 | Adversarial Robustness | ✅ Complete | 100% session-level detection across 5 hard bot patterns; temporal drift scoring |
 | Security Hardening | ✅ Complete | Hashed key storage, CORS allowlist, EXPORT key in Secrets Manager, IP rate limiting, atomic quota enforcement |
 | Auto-Retrain Pipeline | ✅ Complete | EventBridge 6h trigger; retrain threshold 50 real sessions; S3 model registry with versioning + champion promotion |
@@ -127,7 +127,7 @@
 | Lambda | Container image, 1024 MB, 60 s timeout, `awslambdaric` entrypoint; custom WSGI bridge handles API Gateway v2 HTTP event format |
 | API Gateway | HTTP API; `ANY /{proxy+}` → Lambda; 30 s integration timeout |
 | RDS | PostgreSQL 15, `db.t3.micro`, `humanguard-db`; `BackupRetentionPeriod=0` (free tier) |
-| Secrets Manager | `humanGuard/rds` — `{host, port, dbname, username, password}`; fetched by `aws_deploy.sh` to build `DATABASE_URL` |
+| Secrets Manager | `humanGuard/rds` — `{host, port, dbname, username, password}`; Lambda receives only `RDS_SECRET_NAME=humanGuard/rds`; `db_client.py` fetches and caches credentials at cold-start |
 | IAM | `humanguard-lambda-role`: `AWSLambdaBasicExecutionRole` + `CloudWatchFullAccess` + `ses:SendEmail` |
 
 **Deploy issues encountered and resolved:**
@@ -296,13 +296,13 @@ ipinfo.io responses cached in-memory with 1-hour TTL per IP (Lambda-instance-loc
 
 | Resource | Value |
 |---|---|
-| **API (Lambda + API Gateway)** | `https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com` |
-| **CloudFront distribution** | `https://d1hi33wespusty.cloudfront.net` (ID: `E3F5RTWRNWWQB0`) |
+| **API (Lambda + API Gateway)** | `https://humanguard.net` (custom domain; raw API Gateway URL omitted) |
+| **CloudFront distribution** | `https://humanguard.net` (distribution ID omitted) |
 | **Demo** | `https://humanguard.net/demo` |
 | **Leaderboard** | `https://humanguard.net/leaderboard` |
 | **Dashboard** | `https://humanguard.net/dashboard` |
-| **S3 origin (HTTP)** | `http://humanguard-frontend-<account-id>.s3-website-us-east-1.amazonaws.com` |
-| **RDS endpoint** | `humanguard-db.c8p60woyyitr.us-east-1.rds.amazonaws.com:5432` |
+| **S3 origin (HTTP)** | private; fronted by CloudFront only |
+| **RDS endpoint** | private subnet; endpoint omitted |
 | **SNS topic ARN** | `arn:aws:sns:us-east-1:<account-id>:HumanGuard-Alerts` |
 | **Secrets Manager** | `humanGuard/rds`, `humanGuard/exportKey` (us-east-1) |
 | **ECR repository** | `<account-id>.dkr.ecr.us-east-1.amazonaws.com/humanguard` |

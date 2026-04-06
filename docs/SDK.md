@@ -468,7 +468,7 @@ Common errors:
 Get a free API key in one request:
 
 ```bash
-curl -X POST https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com/api/register \
+curl -X POST https://humanguard.net/api/register \
   -H "Content-Type: application/json" \
   -d '{"email": "you@example.com"}'
 ```
@@ -487,7 +487,7 @@ Response:
 Check your usage at any time:
 
 ```bash
-curl https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com/api/usage \
+curl https://humanguard.net/api/usage \
   -H "X-Api-Key: hg_live_XXXX"
 ```
 
