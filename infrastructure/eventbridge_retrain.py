@@ -11,7 +11,7 @@ Usage:
 
 Environment variables:
     AWS_REGION      — defaults to us-east-1
-    AWS_ACCOUNT_ID  — defaults to 796793347388
+    AWS_ACCOUNT_ID  — optional override; resolved via STS if not set
 """
 
 import json
@@ -23,7 +23,11 @@ import boto3
 from botocore.exceptions import ClientError
 
 REGION     = os.environ.get("AWS_REGION", "us-east-1")
-ACCOUNT_ID = os.environ.get("AWS_ACCOUNT_ID", "796793347388")
+# Resolve account ID at runtime; allow an explicit env override for cross-account deploys.
+ACCOUNT_ID = os.environ.get(
+    "AWS_ACCOUNT_ID",
+    boto3.client("sts").get_caller_identity()["Account"],
+)
 
 ECR_REPO_NAME   = "humanguard"
 FUNCTION_NAME   = "humanguard-retrain"

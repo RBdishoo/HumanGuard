@@ -301,11 +301,11 @@ ipinfo.io responses cached in-memory with 1-hour TTL per IP (Lambda-instance-loc
 | **Demo** | `https://humanguard.net/demo` |
 | **Leaderboard** | `https://humanguard.net/leaderboard` |
 | **Dashboard** | `https://humanguard.net/dashboard` |
-| **S3 origin (HTTP)** | `http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com` |
+| **S3 origin (HTTP)** | `http://humanguard-frontend-<account-id>.s3-website-us-east-1.amazonaws.com` |
 | **RDS endpoint** | `humanguard-db.c8p60woyyitr.us-east-1.rds.amazonaws.com:5432` |
-| **SNS topic ARN** | `arn:aws:sns:us-east-1:796793347388:HumanGuard-Alerts` |
+| **SNS topic ARN** | `arn:aws:sns:us-east-1:<account-id>:HumanGuard-Alerts` |
 | **Secrets Manager** | `humanGuard/rds`, `humanGuard/exportKey` (us-east-1) |
-| **ECR repository** | `796793347388.dkr.ecr.us-east-1.amazonaws.com/humanguard` |
+| **ECR repository** | `<account-id>.dkr.ecr.us-east-1.amazonaws.com/humanguard` |
 | **S3 model registry** | `humanguard-models` |
 
 **CloudWatch Alarms (namespace: `HumanGuard`):**

@@ -9,7 +9,6 @@ Usage:
 
 Environment variables:
     AWS_REGION         — defaults to us-east-1
-    AWS_ACCOUNT_ID     — required for alarm ARN construction
     SNS_ALERT_EMAIL    — if set, subscribes this email to the alert topic
 """
 
@@ -18,7 +17,6 @@ import os
 import boto3
 
 REGION = os.environ.get("AWS_REGION", "us-east-1")
-ACCOUNT_ID = os.environ.get("AWS_ACCOUNT_ID", "796793347388")
 NAMESPACE = "HumanGuard"
 TOPIC_NAME = "HumanGuard-Alerts"
 SNS_ALERT_EMAIL = os.environ.get("SNS_ALERT_EMAIL", "")

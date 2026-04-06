@@ -48,7 +48,6 @@ _DEFAULT_ORIGINS = ",".join([
     "https://humanguard.net",
     "https://www.humanguard.net",
     "https://d1hi33wespusty.cloudfront.net",
-    "http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com",
     "http://localhost:5000",
     "http://localhost:5050",
 ])

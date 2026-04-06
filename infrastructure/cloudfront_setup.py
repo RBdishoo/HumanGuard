@@ -12,12 +12,19 @@ Environment variables:
     AWS_REGION  — informational only; CloudFront is a global service
 """
 
+import os
+import sys
+
 import boto3
 from botocore.exceptions import ClientError
 
-S3_WEBSITE_DOMAIN = (
-    "humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com"
-)
+# Set FRONTEND_S3_BUCKET to the name of the S3 static-website bucket.
+# AWS_REGION is used to construct the correct regional S3 website endpoint.
+_bucket = os.environ.get("FRONTEND_S3_BUCKET", "")
+_region = os.environ.get("AWS_REGION", "us-east-1")
+if not _bucket:
+    sys.exit("ERROR: FRONTEND_S3_BUCKET environment variable is required.")
+S3_WEBSITE_DOMAIN = f"{_bucket}.s3-website-{_region}.amazonaws.com"
 DISTRIBUTION_COMMENT = "HumanGuard frontend HTTPS distribution"
 CALLER_REFERENCE = "humanguard-frontend-v1"
 
