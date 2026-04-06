@@ -1,178 +1,232 @@
-# HumanGuard
+<div align="center">
 
-Real-time bot detection API using behavioral biometrics and machine learning.
+# 🛡️ HumanGuard
+
+**Real-time behavioral bot detection API**
+
+Classifies web sessions as human or bot by analyzing mouse trajectories, keystroke dynamics, click patterns, and network signals — no CAPTCHAs required.
+
+[![Tests](https://img.shields.io/badge/tests-158%20passing-brightgreen?style=flat-square)](#testing)
+[![Python](https://img.shields.io/badge/python-3.11-blue?style=flat-square&logo=python)](https://www.python.org/)
+[![AWS Lambda](https://img.shields.io/badge/AWS-Lambda-orange?style=flat-square&logo=amazonaws)](https://aws.amazon.com/lambda/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
+[![Live Demo](https://img.shields.io/badge/demo-live-success?style=flat-square)](https://humanguard.net/demo.html)
+
+[**Live Demo**](https://humanguard.net/demo.html) · [**Leaderboard**](https://humanguard.net/leaderboard.html) · [**Dashboard**](https://humanguard.net/dashboard.html) · [**Register**](https://humanguard.net/register.html)
+
+</div>
 
 ---
 
-## Live Demo
+## What It Does
 
-| Page | URL |
-|---|---|
-| **Demo** (take the challenge) | https://humanguard.net/demo.html |
-| **Leaderboard** | https://humanguard.net/leaderboard.html |
-| **Dashboard** (monitoring) | https://humanguard.net/dashboard.html |
-| **Register** (get an API key) | https://humanguard.net/register.html |
-| **Client Dashboard** | https://humanguard.net/client_dashboard.html |
-| **SDK** | https://humanguard.net/sdk/humanGuard.min.js |
-| **Lambda API** | https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com |
+HumanGuard embeds a lightweight JavaScript tracker on any webpage. The tracker collects raw behavioral signals every 3 seconds and sends them to a scoring API. A **37-feature extraction pipeline** feeds a RandomForest classifier that returns a bot probability score, a 95% confidence interval, and a SHAP-powered explanation of which signals drove the decision — all in a single JSON response.
+
+A second-layer **temporal session blender** catches adaptive bots that behave human-like in early batches then revert to scripted patterns. It achieves **100% session-level detection across 5 hard adversarial bot patterns** where batch-level scoring alone reached only 56%.
+
+> 🏆 **99.6% F1 · 1.0000 ROC-AUC · 100% adversarial detection**
 
 ---
 
-## Overview
+## Quick Start
 
-HumanGuard analyzes raw browser behavioral signals — mouse trajectories, keystroke dynamics, click patterns, and session timing — to classify web sessions as human or bot in real time. A 30-feature extraction pipeline feeds a RandomForest classifier that achieves 99.6% F1 on cross-validation, with every prediction accompanied by a SHAP feature attribution breakdown. A session-level temporal blender catches adaptive bots that mimic humans early in a session and revert to scripted behavior later, achieving **100% detection across 5 hard adversarial bot patterns**. The system is deployed as a containerized Flask API on AWS Lambda behind API Gateway, with RDS PostgreSQL for persistence, CloudWatch metrics and alarms for production observability, and an S3-hosted live dashboard for monitoring.
+**Option 1 — Drop the tracker into any page:**
+
+```html
+<script src="https://humanguard.net/sdk/humanGuard.min.js"
+        data-session-id="your-session-id"
+        data-api-key="hg_live_xxxxxxxx.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+</script>
+```
+
+**Option 2 — Score a batch directly:**
+
+```bash
+curl -X POST https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com/api/score \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: hg_live_xxxxxxxx.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+  -d '{
+    "sessionID": "session_1743200000_abc123",
+    "signals": {
+      "mouseMoves": [{"x": 412, "y": 308, "ts": 1000}, {"x": 428, "y": 315, "ts": 1087}],
+      "clicks":    [{"x": 441, "y": 323, "ts": 1450, "button": 0}],
+      "keys":      [{"key": "h", "ts": 1520}, {"key": "e", "ts": 1634}]
+    }
+  }'
+```
+
+```json
+{
+  "success": true,
+  "sessionID": "session_1743200000_abc123",
+  "prob_bot": 0.032,
+  "label": "human",
+  "threshold": 0.5,
+  "confidence": "high",
+  "confidence_interval": { "lower": 0.011, "upper": 0.053 },
+  "network_signals": {
+    "is_headless_browser": false,
+    "is_datacenter_ip": false,
+    "is_known_bot_ua": false
+  },
+  "explanation": {
+    "interpretation": "Session classified as human; top signal: natural mouse velocity variance.",
+    "top_features": [
+      { "feature": "mouseStdVelocity",    "contribution":  0.768 },
+      { "feature": "batchDurationMs",     "contribution": -2.174 },
+      { "feature": "keystroke_timing_regularity", "contribution": -0.412 }
+    ]
+  }
+}
+```
+
+[**→ Get an API key**](https://humanguard.net/register.html)
 
 ---
 
 ## Architecture
 
 ```
-Browser (tracker.js)
-        │  POST /api/signals  (batches every 3s)
-        ▼
-  API Gateway (HTTP API)
-        │
-        ▼
-  Lambda — Flask + XGBoost
-        │
-        ├──► RDS PostgreSQL ──► sessions / signal_batches / predictions
-        │
-        ├──► CloudWatch Metrics ──► HumanGuard namespace
-        │              │
-        │              └──► 4 Alarms ──► SNS ──► Email Alerts
-        │
-        └──► S3 Static Site (dashboard.html)
+┌─────────────────────────────────────────────────────────────────┐
+│  Browser                                                        │
+│  tracker.js — captures mouse, keys, clicks, scroll             │
+│  auto-batches every 3s → POST /api/signals or /api/score        │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │ HTTPS
+                  ┌────────▼────────┐
+                  │  API Gateway    │  HTTP API · ANY /{proxy+}
+                  └────────┬────────┘
+                           │
+                  ┌────────▼────────────────────────────────────┐
+                  │  AWS Lambda  (Flask · Python 3.11)           │
+                  │                                             │
+                  │  ┌─────────────────────────────────────┐   │
+                  │  │  enrichment.py                      │   │
+                  │  │  parse_user_agent · get_ip_info      │   │
+                  │  │  7 network/device features          │   │
+                  │  └──────────────┬──────────────────────┘   │
+                  │                 │                           │
+                  │  ┌──────────────▼──────────────────────┐   │
+                  │  │  feature_extractor.py               │   │
+                  │  │  37 features (30 behavioral +        │   │
+                  │  │               7 network/device)      │   │
+                  │  └──────────────┬──────────────────────┘   │
+                  │                 │                           │
+                  │  ┌──────────────▼──────────────────────┐   │
+                  │  │  RandomForest  +  SHAP explainer    │   │
+                  │  │  session blender (≥10 batches)       │   │
+                  │  └──────────────┬──────────────────────┘   │
+                  │                 │                           │
+                  └─────────────────┼───────────────────────────┘
+                                    │
+          ┌─────────────────────────┼─────────────────────────┐
+          │                         │                         │
+   ┌──────▼──────┐        ┌─────────▼──────┐        ┌────────▼──────┐
+   │ RDS Postgres│        │  CloudWatch    │        │  S3 Static    │
+   │ sessions    │        │  5 metrics     │        │  Dashboard    │
+   │ predictions │        │  4 alarms      │        │  Leaderboard  │
+   │ webhooks    │        │  SNS alerts    │        │  Demo         │
+   └─────────────┘        └────────────────┘        └───────────────┘
 ```
-
-Signal collection, model inference, and persistence are fully decoupled. A JSONL flat-file path remains active as a fallback whenever PostgreSQL is unavailable.
 
 ---
 
 ## Features
 
-- **Behavioral signal collection** — JavaScript tracker captures mouse movements (100 ms throttle), keystroke timings, click coordinates, and scroll events; auto-batches every 3 seconds
-- **30-feature extraction pipeline** — mouse velocity/acceleration/path efficiency, click clustering/rate, keystroke entropy/inter-key delay statistics, session-consistency features (timing regularity, rhythm autocorrelation, acceleration variance)
-- **RandomForest classifier** — 99.6% F1, 1.0000 ROC-AUC on 5-fold cross-validation; selected over LogisticRegression and XGBoost baselines
-- **Temporal drift scoring** — session blender detects adaptive bots by measuring behavioral drift between first-half and second-half of a session; `temporal_drift_score`, `early_late_timing_delta`, and `behavior_consistency_score` expose pattern shifts invisible to batch-level scoring
-- **Adversarial robustness** — 100% session-level detection across 5 hard bot patterns: human_speed_typer, bezier_mouse, jitter_bot, hybrid_bot, and adaptive_bot; hard test F1: 1.0000
-- **SHAP explainability** — every `/api/score` response includes top-5 feature contributions with human-readable interpretation text
-- **Session-layer scoring** — `/api/session-score` aggregates all batches for a session, applies linear recency weighting, blends with temporal drift via session blender for sessions ≥10 batches
-- **RDS PostgreSQL persistence** — connection-pooled writes via psycopg2; `DatabaseManager` auto-selects SQLite for local dev when `DATABASE_URL` is unset
-- **CloudWatch monitoring** — 5 custom metrics (`score_requests`, `bot_detections`, `human_detections`, `prediction_latency_ms`, `validation_errors`); 4 production alarms
-- **SNS alerting** — alarms publish to `HumanGuard-Alerts` topic; email subscription via `SNS_ALERT_EMAIL`
-- **Live dashboard** — S3-hosted dark-theme monitoring UI with real-time chart, prediction feed, and SHAP feature importance bars
-- **112 automated tests** — pytest suite covering API endpoints, feature extraction, classifier pipeline, SHAP output, DB layer, session scoring, signal validation, demo/export endpoints, model registry, and leaderboard
+### Signal Collection
+- JavaScript tracker captures **mouse movements** (100 ms throttle), **keystroke timings**, **click coordinates**, and **scroll events**
+- Auto-batches every 3 seconds; works headlessly via `POST /api/signals` or inline via `POST /api/score`
+- UTM source tagging passes `utm_source` through each batch for real-data attribution
+
+### 37-Feature Extraction Pipeline
+
+| Category | Count | Key Features |
+|---|---|---|
+| Mouse trajectory | 9 | velocity (avg/std/max), path efficiency, angular velocity std, hover time/frequency, pause duration |
+| Click dynamics | 5 | interval mean/std/min/max, click rate |
+| Keystroke dynamics | 6 | inter-key delay mean/std, rapid presses, entropy, key rate, count |
+| Temporal composites | 4 | batch duration, event rate, click-to-move ratio, key-to-move ratio |
+| Batch-level | 4 | event count, has_mouse_moves, has_clicks, has_keys |
+| Session consistency | 5 | keystroke timing regularity, typing rhythm autocorrelation, mouse acceleration variance, mouse-keystroke correlation, session phase consistency |
+| Network / device | 7 | headless browser, known bot UA, datacenter IP, UA entropy, Accept-Language presence/count, suspicious header count |
+
+### Model & Scoring
+- **RandomForest champion** — 99.6% F1, 1.0000 ROC-AUC on 5-fold cross-validation
+- **95% confidence intervals** on every score — derived from per-tree variance; exposes `confidence`, `confidence_interval`, and `std` fields
+- **SHAP explainability** — top-5 feature attributions with human-readable interpretation text on every response (`?explain=false` to skip)
+- **Temporal session blender** — LogisticRegression meta-model aggregates batches for sessions ≥10; measures behavioral drift between first-half and second-half patterns
+
+### Adversarial Robustness
+
+| Bot Pattern | Batch Detection | Session Detection |
+|---|---|---|
+| human_speed_typer | 100% | **100%** |
+| bezier_mouse | 100% | **100%** |
+| jitter_bot | 100% | **100%** |
+| hybrid_bot | 100% | **100%** |
+| adaptive_bot | 50% | **100%** |
+| **Overall** | **90.0%** | **100.0%** |
+
+### Infrastructure
+- **Webhooks** — HMAC-SHA256 signed delivery; `bot_detected`, `score_completed`, `high_confidence_bot` events; auto-disables after 5 failures
+- **Email verification** — AWS SES verification flow on API key registration; 10-request trial period
+- **Auto-retrain pipeline** — EventBridge (6h) triggers `retrain.py --auto`; retrains when real human session count ≥ 50; promotes champion to S3 model registry
+- **CloudWatch monitoring** — 5 custom metrics, 4 production alarms (bot rate spike, p95 latency, error rate, validation errors)
+- **CORS allowlist** — env-var-driven `ALLOWED_ORIGINS`; no wildcard in production
+- **Atomic quota enforcement** — `UPDATE … WHERE count < limit RETURNING` prevents TOCTOU race on monthly usage checks
 
 ---
 
 ## API Reference
 
-### `GET /health`
+### Endpoints
 
-Liveness check. Does not load model artifacts.
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| `GET` | `/health` | — | Liveness check |
+| `POST` | `/api/score` | API key | Score a signal batch; returns prob, label, SHAP, CI |
+| `POST` | `/api/signals` | — | Ingest a raw signal batch for storage |
+| `GET/POST` | `/api/session-score` | API key | Aggregate all batches for a session with temporal blending |
+| `GET` | `/api/stats` | — | Collection statistics and live prediction counts |
+| `GET` | `/api/dashboard-stats` | — | Dashboard data: recent predictions, bot rate, top features |
+| `GET` | `/api/data-stats` | — | Real session counts and retrain readiness |
+| `GET` | `/api/retrain-status` | API key | Last retrain timestamp and trigger status |
+| `GET` | `/api/model-info` | API key | Active model version and champion metadata |
+| `POST` | `/api/register` | — | Register and obtain an API key (email verification required) |
+| `GET/POST` | `/api/leaderboard` | — | Public demo leaderboard |
+| `POST/GET/DELETE` | `/api/webhooks` | API key | Manage webhook subscriptions |
 
-```http
-GET /health
-```
-
-```json
-{
-  "status": "ok",
-  "model": "XGBoost",
-  "version": "1.0.0",
-  "uptime_seconds": 142.3,
-  "timestamp": "2026-03-29T22:19:35.741528+00:00"
-}
-```
-
----
-
-### `POST /api/score`
-
-Score a single signal batch. Returns bot probability, label, classification threshold, and SHAP explanation.
-
-Append `?explain=false` to skip SHAP computation for lower latency.
-
-**Request**
-
-```json
-{
-  "sessionID": "session_1743200000_abc123xyz",
-  "signals": {
-    "mouseMoves": [
-      { "x": 412, "y": 308, "ts": 1000 },
-      { "x": 428, "y": 315, "ts": 1087 },
-      { "x": 441, "y": 323, "ts": 1201 }
-    ],
-    "clicks": [
-      { "x": 441, "y": 323, "ts": 1450, "button": 0 }
-    ],
-    "keys": [
-      { "key": "h", "ts": 1520 },
-      { "key": "e", "ts": 1634 },
-      { "key": "l", "ts": 1741 }
-    ]
-  }
-}
-```
-
-**Response**
+### `/api/score` — Full Response Schema
 
 ```json
 {
   "success": true,
-  "sessionID": "session_1743200000_abc123xyz",
+  "sessionID": "session_1743200000_abc123",
   "prob_bot": 0.032,
   "label": "human",
   "threshold": 0.5,
+  "confidence": "high",
+  "confidence_interval": { "lower": 0.011, "upper": 0.053 },
+  "std": 0.021,
+  "network_signals": {
+    "is_headless_browser": false,
+    "is_known_bot_ua": false,
+    "is_datacenter_ip": false,
+    "ua_entropy": 4.87,
+    "has_accept_language": true,
+    "accept_language_count": 2,
+    "suspicious_header_count": 0
+  },
   "explanation": {
-    "interpretation": "Session classified as human; top signal: abnormal batch duration.",
+    "interpretation": "Session classified as human; top signal: natural mouse velocity variance.",
     "top_features": [
-      { "feature": "batchDurationMs",     "contribution": -2.174 },
-      { "feature": "mouseStdVelocity",    "contribution":  0.768 },
-      { "feature": "clickToMoveRatio",    "contribution": -0.348 },
-      { "feature": "clickRatePerSec",     "contribution": -0.319 },
-      { "feature": "mouseHoverFrequency", "contribution": -0.268 }
+      { "feature": "mouseStdVelocity",             "contribution":  0.768 },
+      { "feature": "batchDurationMs",              "contribution": -2.174 },
+      { "feature": "keystroke_timing_regularity",  "contribution": -0.412 },
+      { "feature": "clickToMoveRatio",             "contribution": -0.348 },
+      { "feature": "mouseHoverFrequency",          "contribution": -0.268 }
     ]
   }
-}
-```
-
----
-
-### `POST /api/signals`
-
-Ingest a raw signal batch for storage. Used by the browser tracker.
-
-**Request** — same schema as `/api/score`.
-
-**Response**
-
-```json
-{
-  "success": true,
-  "message": "Saved batch for session session_1743200000_abc123xyz",
-  "Total Batches": 14,
-  "Session ID": "session_1743200000_abc123xyz"
-}
-```
-
----
-
-### `GET /api/stats`
-
-Collection statistics plus live prediction counts from RDS.
-
-```json
-{
-  "Total Batches": 214,
-  "Unique Sessions": 38,
-  "Signals File Size (in Kb)": 512.4,
-  "total_predictions": 189,
-  "bot_count": 42,
-  "human_count": 147,
-  "bot_rate": 0.2222,
-  "Server Timestamp": "2026-03-29T22:22:55.075875Z"
 }
 ```
 
@@ -180,68 +234,63 @@ Collection statistics plus live prediction counts from RDS.
 
 ## Tech Stack
 
-| Layer | Technology | Why |
-|---|---|---|
-| **ML** | XGBoost, scikit-learn, SHAP | Gradient boosting for tabular behavioral features; SHAP for production explainability |
-| **Backend** | Flask, Python 3.11 | Lightweight WSGI; minimal cold-start footprint on Lambda |
-| **Runtime** | AWS Lambda (container image) + awslambdaric | Serverless; scales to zero; container image supports the full ML dependency stack |
-| **API Gateway** | AWS API Gateway HTTP API | Low-latency HTTP proxy; routes all methods via `ANY /{proxy+}` |
-| **Database** | PostgreSQL (AWS RDS), SQLite (local) | `DatabaseManager` auto-selects backend from `DATABASE_URL`; psycopg2 connection pooling |
-| **Container Registry** | AWS ECR | Private registry for Lambda container images |
-| **Monitoring** | AWS CloudWatch | Custom metrics namespace, metric-math ratio alarms, p95 latency alarm |
-| **Alerting** | AWS SNS | Email notifications on alarm state transitions |
-| **Secrets** | AWS Secrets Manager | RDS credentials stored as `humanGuard/rds`; fetched at deploy time |
-| **Dashboard** | S3 static website | Zero-server frontend; canvas chart polling `/api/dashboard-stats` |
-| **Testing** | pytest | 112 tests across 13 test files |
+| Layer | Technology |
+|---|---|
+| **ML** | scikit-learn RandomForest, SHAP TreeExplainer |
+| **Backend** | Flask 3, Python 3.11 |
+| **Runtime** | AWS Lambda (container image) + `awslambdaric` |
+| **API** | AWS API Gateway HTTP API |
+| **Database** | PostgreSQL 15 on AWS RDS · SQLite auto-fallback for local dev |
+| **Object Storage** | AWS S3 (model registry + static frontend) |
+| **Monitoring** | AWS CloudWatch (custom namespace) + SNS email alerts |
+| **Email** | AWS SES (API key verification) |
+| **Secrets** | AWS Secrets Manager (`humanGuard/rds`, `humanGuard/exportKey`) |
+| **CDN** | AWS CloudFront (`humanguard.net`) |
+| **Container Registry** | AWS ECR |
+| **Testing** | pytest (158 tests · 15 files) |
 
 ---
 
 ## Local Development
 
 ```bash
-# 1. Clone and create virtual environment
+# 1. Clone and set up environment
 git clone https://github.com/RBdishoo/HumanGuard.git
 cd HumanGuard
 python -m venv venv && source venv/bin/activate
-
-# 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. (Optional) Generate synthetic training data and retrain the model
+# 2. (Optional) Generate synthetic training data and retrain
 python scripts/seed_bot_session.py
 python scripts/seed_human_session.py
 python -m models.run_training
 
-# 4. Start the server  (frontend + API on http://localhost:5050)
+# 3. Start the server (http://localhost:5050)
 python -m backend.app
 
-# 5. Run the test suite
+# 4. Run the test suite
 pytest tests/ -v
 ```
 
-The server auto-detects the absence of `DATABASE_URL` and falls back to a local SQLite file at `backend/data/humanguard.db`. CloudWatch metrics are no-ops unless `CLOUDWATCH_ENABLED=true` is set.
+The server auto-detects the absence of `DATABASE_URL` and falls back to a local SQLite file at `backend/data/humanguard.db`. CloudWatch metrics are no-ops unless `CLOUDWATCH_ENABLED=true` is set. The email service logs verification links to stdout when `SENDER_EMAIL` is unset.
 
 ---
 
 ## Deployment
 
-Deployment targets AWS Lambda using a container image. The full pipeline is automated in `scripts/aws_deploy.sh`:
-
-1. **ECR** — creates a private repository and pushes the `linux/amd64` Docker image
-2. **IAM** — creates the Lambda execution role with CloudWatch and basic execution policies
-3. **Lambda** — deploys the container image with 1 GB memory and a 60 s timeout
-4. **API Gateway** — creates an HTTP API with a catch-all `ANY /{proxy+}` → Lambda integration
+Full deploy is automated in `scripts/aws_deploy.sh`.
 
 ```bash
 # One-time infrastructure setup
 DB_PASSWORD=<strong-password> python infrastructure/rds_setup.py
 python infrastructure/cloudwatch_alarms.py
+python infrastructure/ses_setup.py       # SES sender verification
 
-# Full deploy (or initial deploy)
+# Full deploy
 bash scripts/aws_deploy.sh
 ```
 
-For redeployments when Lambda already exists:
+For redeployments after Lambda already exists:
 
 ```bash
 docker build --platform linux/amd64 -t humanguard:latest .
@@ -251,6 +300,8 @@ aws lambda update-function-code --function-name humanguard \
   --image-uri <account>.dkr.ecr.us-east-1.amazonaws.com/humanguard:latest
 ```
 
+The deploy script provisions: ECR repository → Docker image push → IAM execution role → Lambda function → API Gateway HTTP API → CloudFront distribution.
+
 ---
 
 ## Project Structure
@@ -258,46 +309,90 @@ aws lambda update-function-code --function-name humanguard \
 ```
 HumanGuard/
 ├── backend/
-│   ├── app.py                      # Flask application, all API routes
-│   ├── monitoring.py               # CloudWatch metrics singleton
+│   ├── app.py                    # Flask application — all 12 API routes
+│   ├── enrichment.py             # IP/UA enrichment — ipinfo.io + UA parsing
+│   ├── email_service.py          # AWS SES sender with HTML template
+│   ├── monitoring.py             # CloudWatch metrics singleton
 │   ├── collectors/
-│   │   └── signal_collector.py     # JSONL signal batch writer
+│   │   └── signal_collector.py   # JSONL + PostgreSQL dual-write
 │   ├── db/
-│   │   ├── __init__.py             # DatabaseManager (SQLite / PostgreSQL)
-│   │   ├── db_client.py            # PostgreSQL connection pool
-│   │   ├── migrate.py              # JSONL → PostgreSQL migration script
-│   │   └── schema.sql              # DDL: sessions, signal_batches, predictions
-│   ├── features/
-│   │   ├── feature_extractor.py    # 33-feature extraction from raw signals
-│   │   ├── feature_utils.py        # Mouse trajectory and keystroke math utilities
-│   │   ├── dataset_builder.py      # Batch/session-level CSV dataset builder
-│   │   └── data_loader.py          # JSONL signal loader and validator
-│   └── utils/
-│       └── helpers.py              # Validation, normalization, timestamp helpers
+│   │   ├── __init__.py           # DatabaseManager (SQLite / PostgreSQL)
+│   │   ├── db_client.py          # PostgreSQL connection pool
+│   │   └── schema.sql            # DDL: sessions, signal_batches, predictions, webhooks
+│   └── features/
+│       ├── feature_extractor.py  # 37-feature extraction (30 behavioral + 7 network)
+│       ├── feature_utils.py      # Mouse trajectory and keystroke math utilities
+│       ├── dataset_builder.py    # Batch/session-level CSV dataset builder
+│       └── data_loader.py        # JSONL signal loader and validator
 ├── models/
-│   ├── dataset.py                  # ModelDataset: feature loading, train/test split, scaling
-│   ├── train.py                    # ModelTrainer: RandomForest, LogisticRegression, XGBoost
-│   ├── evaluate.py                 # Metrics reports and confusion matrix plots
-│   ├── run_training.py             # Training entry point
-│   └── trained/                    # Serialized artifacts (XGBoost.pkl, scaler.pkl, …)
+│   ├── dataset.py                # ModelDataset: feature loading, scaling, split
+│   ├── train.py                  # ModelTrainer: RandomForest, LR, XGBoost comparison
+│   ├── run_training.py           # Training entry point
+│   └── trained/                  # Serialized artifacts (.pkl)
 ├── frontend/
-│   ├── tracker.js                  # Browser signal collector (auto-batches every 3s)
-│   ├── dashboard.html              # Live monitoring dashboard
-│   ├── index.html                  # Demo frontend
-│   └── style.css
-├── infrastructure/
-│   ├── rds_setup.py                # Idempotent RDS + Secrets Manager provisioning
-│   └── cloudwatch_alarms.py        # Creates/updates 4 CloudWatch alarms and SNS topic
+│   ├── tracker.js                # Browser signal collector
+│   ├── demo.html                 # Interactive challenge demo
+│   ├── dashboard.html            # Live monitoring dashboard
+│   ├── leaderboard.html          # Public leaderboard
+│   ├── register.html             # API key registration
+│   └── verify.html               # Email verification landing page
 ├── scripts/
-│   ├── aws_deploy.sh               # Full ECR → Lambda → API Gateway deploy
-│   ├── seed_bot_session.py         # Synthetic bot session generator
-│   ├── seed_human_session.py       # Synthetic human session generator
-│   └── report_training_summary.py  # Prints model comparison metrics
-├── tests/                          # 70 pytest tests across 11 files
-├── Dockerfile                      # python:3.11-slim, linux/amd64, awslambdaric entrypoint
-├── requirements.txt                # Development dependencies
-└── requirements-prod.txt           # Production dependencies (boto3, psycopg2-binary, shap)
+│   ├── aws_deploy.sh             # Full ECR → Lambda → API Gateway deploy
+│   ├── retrain.py                # Auto-retrain with S3 model registry
+│   ├── seed_bot_session.py       # Synthetic bot session generator
+│   └── seed_human_session.py     # Synthetic human session generator
+├── infrastructure/
+│   ├── rds_setup.py              # Idempotent RDS + Secrets Manager provisioning
+│   ├── cloudwatch_alarms.py      # 4 CloudWatch alarms + SNS topic
+│   └── ses_setup.py              # SES sender verification
+├── tests/                        # 158 pytest tests across 15 files
+├── Dockerfile                    # python:3.11-slim · linux/amd64 · awslambdaric
+├── requirements.txt              # Development dependencies
+├── requirements-prod.txt         # Production dependencies
+└── PROGRESS.md                   # Full technical build log
 ```
+
+---
+
+## Testing
+
+158 tests across 15 files — all passing.
+
+```bash
+pytest tests/ -v
+```
+
+| File | Tests | Coverage |
+|---|---|---|
+| `test_features.py` | 8 | 37-feature vector shape, math correctness, edge cases |
+| `test_api.py` | 7 | `/api/signals`, `/api/score`, oversized payload, CORS headers |
+| `test_db.py` | 15 | `DatabaseManager` round-trips, source column, dual-write, fallbacks |
+| `test_session_score.py` | 8 | Aggregation, recency weighting, drift scoring, edge cases |
+| `test_shap.py` | 6 | Top-5 features, `_SHAP_PENDING` sentinel, `?explain=false` |
+| `test_scoring.py` | 5 | Confidence interval fields, bounds in [0,1], non-ensemble fallback |
+| `test_webhooks.py` | 8 | Registration, scoping, HMAC correctness, auto-disable |
+| `test_email_verification.py` | 6 | 24h token, expiry, trial limit, verified bypass |
+| `test_enrichment.py` | 8 | Headless/bot UA detection, datacenter IP, cache hit, missing headers |
+| `test_model_registry.py` | 5 | Push, load latest, promote, rollback |
+| `test_leaderboard.py` | 6 | Validation, rank/percentile, full score→submit flow |
+| `test_dashboard.py` | 8 | Stats fields, PostgreSQL and JSONL fallback paths |
+| `test_demo.py` | 6 | source/label fields, export access control |
+| `test_health.py` | 6 | Status, required fields, uptime |
+| `test_signal_collector.py` | 5 | JSONL write, session deduplication, Lambda `/tmp` redirect |
+| `test_helpers.py` | 7 | Signal validation, normalization, session ID format |
+
+---
+
+## Live URLs
+
+| Resource | URL |
+|---|---|
+| Demo | https://humanguard.net/demo.html |
+| Leaderboard | https://humanguard.net/leaderboard.html |
+| Dashboard | https://humanguard.net/dashboard.html |
+| Register | https://humanguard.net/register.html |
+| SDK | https://humanguard.net/sdk/humanGuard.min.js |
+| Lambda API | https://9ixzk5e9u4.execute-api.us-east-1.amazonaws.com |
 
 ---
 
