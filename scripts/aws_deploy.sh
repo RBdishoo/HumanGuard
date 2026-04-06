@@ -15,7 +15,9 @@
 set -e
 
 # --- CONFIG ---
-AWS_ACCOUNT_ID=796793347388
+# Resolve account ID at runtime so no literal ID is stored in source control.
+# Set AWS_ACCOUNT_ID in the environment to override (e.g. for cross-account deploys).
+AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID:-$(aws sts get-caller-identity --query Account --output text)}
 AWS_REGION=us-east-1
 REPO_NAME=humanguard
 FUNCTION_NAME=humanguard
@@ -26,7 +28,7 @@ CLOUDWATCH_ENABLED=true
 SNS_ALERT_EMAIL=${SNS_ALERT_EMAIL:-"rbdishoo@gmail.com"}
 SENDER_EMAIL=${SENDER_EMAIL:-"noreply@humanguard.net"}
 DB_MAX_CONNECTIONS=5
-ALLOWED_ORIGINS_PROD="https://humanguard.net,https://www.humanguard.net,https://d1hi33wespusty.cloudfront.net,http://humanguard-frontend-796793347388.s3-website-us-east-1.amazonaws.com"
+ALLOWED_ORIGINS_PROD="https://humanguard.net,https://www.humanguard.net,https://d1hi33wespusty.cloudfront.net"
 
 # Fetch master key from Secrets Manager; generate and store one on first run.
 HUMANGUARD_MASTER_KEY=${HUMANGUARD_MASTER_KEY:-""}
@@ -72,6 +74,10 @@ fi
 # Optional: set FRONTEND_S3_BUCKET to upload all frontend/ files to S3
 # e.g. FRONTEND_S3_BUCKET=humanguard-frontend ./scripts/aws_deploy.sh
 FRONTEND_S3_BUCKET=${FRONTEND_S3_BUCKET:-""}
+# If a frontend bucket is configured, add its S3 website origin to CORS allowed list.
+if [ -n "$FRONTEND_S3_BUCKET" ]; then
+    ALLOWED_ORIGINS_PROD="$ALLOWED_ORIGINS_PROD,http://$FRONTEND_S3_BUCKET.s3-website-$AWS_REGION.amazonaws.com"
+fi
 
 # Fetch DATABASE_URL from Secrets Manager (set to empty if secret not yet created)
 DATABASE_URL=""
