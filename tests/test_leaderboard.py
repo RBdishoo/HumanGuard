@@ -239,6 +239,52 @@ def test_leaderboard_sanitizes_nickname():
     assert len(captured.get("nickname", "")) <= 20
 
 
+def test_leaderboard_post_finds_session_id_snake_case_log():
+    """POST /api/leaderboard finds a log entry written with the new 'session_id' key."""
+    client = _client()
+    session_id = "lb-snake-case-test-001"
+
+    log_entry = json.dumps({
+        "session_id": session_id,
+        "prob_bot": 0.08,
+        "label": "human",
+        "threshold": 0.5,
+        "scoring_type": "batch",
+        "timestamp": "2026-04-07T00:00:00+00:00",
+    })
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+        f.write(log_entry + "\n")
+        tmp_path = Path(f.name)
+
+    try:
+        with mock.patch.object(app_module, "PREDICTIONS_LOG", tmp_path):
+            with mock.patch.object(app_module.db_manager, "save_leaderboard_entry", return_value=1):
+                with mock.patch.object(
+                    app_module.db_manager,
+                    "get_leaderboard",
+                    return_value=[{
+                        "nickname": "SnakeUser",
+                        "prob_bot": 0.08,
+                        "verdict": "human",
+                        "session_id": session_id,
+                        "created_at": "2026-04-07T00:00:00",
+                    }],
+                ):
+                    resp = client.post(
+                        "/api/leaderboard",
+                        data=json.dumps({"nickname": "SnakeUser", "session_id": session_id}),
+                        content_type="application/json",
+                    )
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    assert resp.status_code == 200
+    body = json.loads(resp.data)
+    assert isinstance(body.get("rank"), int)
+    assert body["rank"] > 0
+
+
 def test_leaderboard_full_flow():
     """End-to-end: score via /api/score then submit to /api/leaderboard.
 

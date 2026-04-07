@@ -102,6 +102,10 @@ _scoring_bundle = None
 _server_start_time = None
 _SHAP_PENDING = object()  # sentinel: explainer not yet attempted
 
+# Cached secrets — resolved once per cold start; never stored in env vars
+_master_key = None
+_export_key = None
+
 # Human-readable explanations for each feature when it contributes to a bot prediction
 FEATURE_INTERPRETATIONS = {
     "batch_event_count": "unusual total number of events in the batch",
@@ -156,6 +160,89 @@ _registration_attempts: dict = {}
 _registration_lock = threading.Lock()
 
 
+def _resolve_master_key() -> str:
+    """
+    Return the master API key, resolving it exactly once per Lambda container lifetime.
+
+    Fast path  — HUMANGUARD_MASTER_KEY is set in the environment (local dev).
+    Cold-start — MASTER_KEY_SECRET_NAME names a Secrets Manager secret whose JSON
+                 payload contains {"key": "..."}.  Cached in _master_key so
+                 subsequent calls within the same container are instant.
+    """
+    global _master_key
+    if _master_key is not None:
+        return _master_key
+
+    # Fast path: explicit env var (local dev)
+    val = os.environ.get("HUMANGUARD_MASTER_KEY")
+    if val:
+        _master_key = val
+        return _master_key
+
+    # Cold-start path: fetch from Secrets Manager
+    secret_name = os.environ.get("MASTER_KEY_SECRET_NAME", "humanGuard/masterKey")
+    import boto3
+    region = os.environ.get("AWS_REGION", "us-east-1")
+    sm = boto3.client("secretsmanager", region_name=region)
+    try:
+        resp = sm.get_secret_value(SecretId=secret_name)
+        secret = json.loads(resp["SecretString"])
+        _master_key = secret["key"]
+        logger.info("Master key fetched from Secrets Manager: %s", secret_name)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to fetch master key from Secrets Manager "
+            f"(secret='{secret_name}'): {exc}"
+        ) from exc
+
+    return _master_key
+
+
+def _resolve_export_key() -> str:
+    """
+    Return the export API key, resolving it exactly once per Lambda container lifetime.
+
+    Fast path  — EXPORT_API_KEY is set in the environment (local dev).
+    Cold-start — EXPORT_KEY_SECRET_NAME names a Secrets Manager secret whose JSON
+                 payload contains {"key": "..."}.  Cached in _export_key so
+                 subsequent calls within the same container are instant.
+    """
+    global _export_key
+    if _export_key is not None:
+        return _export_key
+
+    # Fast path: explicit env var (local dev)
+    val = os.environ.get("EXPORT_API_KEY")
+    if val:
+        _export_key = val
+        return _export_key
+
+    # Cold-start path: fetch from Secrets Manager
+    secret_name = os.environ.get("EXPORT_KEY_SECRET_NAME", "humanGuard/exportKey")
+    import boto3
+    region = os.environ.get("AWS_REGION", "us-east-1")
+    sm = boto3.client("secretsmanager", region_name=region)
+    try:
+        resp = sm.get_secret_value(SecretId=secret_name)
+        secret = json.loads(resp["SecretString"])
+        _export_key = secret["key"]
+        logger.info("Export key fetched from Secrets Manager: %s", secret_name)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to fetch export key from Secrets Manager "
+            f"(secret='{secret_name}'): {exc}"
+        ) from exc
+
+    return _export_key
+
+
+def _reset_secret_caches():
+    """Reset cached secret values (for test isolation)."""
+    global _master_key, _export_key
+    _master_key = None
+    _export_key = None
+
+
 def require_api_key(f=None, *, count_usage=True):
     """Decorator: validate X-Api-Key header; enforce per-plan rate limits.
 
@@ -181,7 +268,10 @@ def require_api_key(f=None, *, count_usage=True):
             api_key = request.headers.get("X-Api-Key", "")
 
             # Master key bypasses all limits
-            master_key = os.environ.get("HUMANGUARD_MASTER_KEY", "")
+            try:
+                master_key = _resolve_master_key()
+            except RuntimeError:
+                master_key = ""
             if master_key and api_key == master_key:
                 g.api_key = api_key
                 g.is_master = True
@@ -357,7 +447,7 @@ def _log_prediction_local(session_id, prob_bot, label, threshold,
                           source=None, ground_truth_label=None):
     """Append a prediction entry to the local JSONL log for dashboard fallback."""
     entry = {
-        "sessionID": session_id,
+        "session_id": session_id,
         "prob_bot": prob_bot,
         "label": label,
         "threshold": threshold,
@@ -575,7 +665,7 @@ def scoreSignals():
             _pred_source = payload_source or getattr(g, "api_key", None)
             _caller_key = getattr(g, "api_key", None)
             db_manager.save_prediction(
-                data.get("sessionID"), prob_bot, label == "bot",
+                data.get("session_id"), prob_bot, label == "bot",
                 threshold=float(bundle["threshold"]),
                 scoring_type="batch",
                 source=_pred_source,
@@ -599,7 +689,7 @@ def scoreSignals():
 
         response = {
             "success": True,
-            "sessionID": data.get("sessionID"),
+            "sessionID": data.get("session_id"),
             "prob_bot": prob_bot,
             "label": label,
             "threshold": float(bundle["threshold"]),
@@ -629,7 +719,7 @@ def scoreSignals():
 
         _response_time_ms = round((time.time() - _score_start) * 1000, 1)
         _log_prediction_local(
-            data.get("sessionID"), prob_bot, label, float(bundle["threshold"]),
+            data.get("session_id"), prob_bot, label, float(bundle["threshold"]),
             scoring_type="batch",
             response_time_ms=_response_time_ms,
             explanation=response.get("explanation"),
@@ -641,7 +731,7 @@ def scoreSignals():
         # Fire webhooks asynchronously — never blocks the score response
         _fire_webhooks(
             api_key_id=_key_id_from_full(getattr(g, "api_key", "") or ""),
-            session_id=data.get("sessionID"),
+            session_id=data.get("session_id"),
             prob_bot=prob_bot,
             label=label,
             confidence=_confidence_level,
@@ -673,7 +763,8 @@ def _load_session_batches(session_id):
         for line in f:
             try:
                 record = json.loads(line.strip())
-                if record.get("sessionID") == session_id:
+                sid = record.get("session_id") or record.get("sessionID")
+                if sid == session_id:
                     batches.append(record.get("signals") or {})
             except (json.JSONDecodeError, Exception):
                 continue
@@ -872,9 +963,12 @@ def sessionScore():
     Session-level bot scoring — aggregates all batches for a sessionID.
     """
     data = request.get_json(silent=True)
-    if not data or "sessionID" not in data:
+    if not data:
         return jsonify({"error": "Missing sessionID"}), 400
-    response, status = _session_score_logic(data["sessionID"])
+    data = normalizeSignalBatch(data)
+    if "session_id" not in data:
+        return jsonify({"error": "Missing sessionID"}), 400
+    response, status = _session_score_logic(data["session_id"])
     return jsonify(response), status
 
 
@@ -1027,7 +1121,7 @@ def saveSignals():
         sig = data.get("signals") or {}
         logger.info(
             "Received signal batch session=%s moves=%s clicks=%s keys=%s",
-            data.get("sessionID"),
+            data.get("session_id"),
             len(sig.get("mouseMoves") or []),
             len(sig.get("clicks") or []),
             len(sig.get("keys") or []),
@@ -1044,9 +1138,9 @@ def saveSignals():
 
             return jsonify({
                 "success": True,
-                "message": f"Saved batch for session {data.get('sessionID', 'unknown')}",
+                "message": f"Saved batch for session {data.get('session_id', 'unknown')}",
                 "Total Batches": collector.getBatchCount(),
-                "Session ID": data.get('sessionID')
+                "Session ID": data.get('session_id')
             }), 200
         else:
             return jsonify({"Error": "Failed to save batch"}), 500
@@ -1107,7 +1201,7 @@ def _dashboard_stats_from_log(threshold):
     recent_raw = records[-10:][::-1]
     recent_predictions = [
         {
-            "sessionID": r.get("sessionID"),
+            "sessionID": r.get("session_id") or r.get("sessionID"),
             "prob_bot": r.get("prob_bot"),
             "label": r.get("label"),
             "timestamp": r.get("timestamp"),
@@ -1335,7 +1429,8 @@ def leaderboardPost():
                     continue
                 try:
                     rec = json.loads(line)
-                    if rec.get("sessionID") == session_id:
+                    sid = rec.get("session_id") or rec.get("sessionID")
+                    if sid == session_id:
                         prob_bot = rec.get("prob_bot")
                         verdict = rec.get("label")
                 except Exception:
@@ -1437,7 +1532,10 @@ def exportSessions():
     from flask import Response
 
     api_key = request.headers.get("X-Export-Key", "")
-    export_key = os.environ.get("EXPORT_API_KEY")
+    try:
+        export_key = _resolve_export_key()
+    except RuntimeError:
+        export_key = None
     if not export_key:
         return jsonify({"error": "export not configured"}), 503
     if not api_key or api_key != export_key:
@@ -1463,7 +1561,7 @@ def exportSessions():
     ])
     for r in records:
         writer.writerow([
-            r.get("sessionID", ""),
+            r.get("session_id") or r.get("sessionID", ""),
             r.get("source", ""),
             r.get("ground_truth_label", ""),
             r.get("prob_bot", ""),

@@ -256,7 +256,7 @@ class DatabaseManager:
         """Upsert session and append a signal batch."""
         if not isinstance(session_data, dict):
             return
-        session_id = session_data.get("sessionID")
+        session_id = session_data.get("session_id")
         if not session_id:
             return
 

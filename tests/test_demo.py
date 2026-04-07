@@ -126,10 +126,18 @@ def test_score_accepts_source_and_label(tmp_path):
 # ──────────────────────────────────────────────────────────────────────────────
 
 def test_export_not_configured_returns_503():
-    """GET /api/export when EXPORT_API_KEY env var is unset returns 503."""
-    env_without_key = {k: v for k, v in os.environ.items() if k != "EXPORT_API_KEY"}
-    with mock.patch.dict(os.environ, env_without_key, clear=True):
+    """GET /api/export when neither EXPORT_API_KEY nor Secrets Manager is available returns 503."""
+    app_module._reset_secret_caches()
+    env_without_key = {k: v for k, v in os.environ.items()
+                       if k not in ("EXPORT_API_KEY", "EXPORT_KEY_SECRET_NAME")}
+    mock_sm = mock.MagicMock()
+    mock_sm.get_secret_value.side_effect = Exception("no credentials")
+    mock_boto3 = mock.MagicMock()
+    mock_boto3.client.return_value = mock_sm
+    with mock.patch.dict(os.environ, env_without_key, clear=True), \
+         mock.patch.dict("sys.modules", {"boto3": mock_boto3}):
         resp = _client().get("/api/export")
+    app_module._reset_secret_caches()
     assert resp.status_code == 503
     body = json.loads(resp.data)
     assert body.get("error") == "export not configured"
@@ -169,9 +177,11 @@ def test_export_returns_csv_with_valid_key(tmp_path):
         "timestamp": "2026-01-01T00:00:00+00:00",
     }) + "\n")
 
+    app_module._reset_secret_caches()
     with mock.patch.object(app_module, "PREDICTIONS_LOG", log_path), \
          mock.patch.dict(os.environ, {"EXPORT_API_KEY": "testkey"}):
         resp = _client().get("/api/export", headers={"X-Export-Key": "testkey"})
+    app_module._reset_secret_caches()
 
     assert resp.status_code == 200
     assert "text/csv" in resp.content_type
@@ -191,9 +201,11 @@ def test_export_csv_has_required_columns(tmp_path):
         "timestamp": "2026-01-01T00:00:00+00:00",
     }) + "\n")
 
+    app_module._reset_secret_caches()
     with mock.patch.object(app_module, "PREDICTIONS_LOG", log_path), \
          mock.patch.dict(os.environ, {"EXPORT_API_KEY": "devkey"}):
         resp = _client().get("/api/export", headers={"X-Export-Key": "devkey"})
+    app_module._reset_secret_caches()
 
     assert resp.status_code == 200
     reader = csv.DictReader(io.StringIO(resp.data.decode("utf-8")))

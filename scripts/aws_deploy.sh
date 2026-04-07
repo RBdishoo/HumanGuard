@@ -270,31 +270,32 @@ echo ""
 echo "--- Step 6: Create or update Lambda function ---"
 
 # Build env JSON via python3 so commas inside ALLOWED_ORIGINS don't break parsing.
-# DATABASE_URL is intentionally absent — db_client.py fetches credentials from
-# Secrets Manager at cold-start using RDS_SECRET_NAME, keeping the plaintext
-# password out of the Lambda console, CloudTrail, and environment variable logs.
+# DATABASE_URL, HUMANGUARD_MASTER_KEY, and EXPORT_API_KEY are intentionally absent —
+# the application fetches each secret from Secrets Manager at cold-start using the
+# corresponding *_SECRET_NAME env var, keeping all plaintext values out of the Lambda
+# console, CloudTrail, and environment variable logs.
 ENV_VARS=$(env \
     _PORT="8080" \
     _CW="$CLOUDWATCH_ENABLED" \
     _SNS="$SNS_ALERT_EMAIL" \
     _RDS_SECRET="$RDS_SECRET_NAME" \
     _DBMAX="$DB_MAX_CONNECTIONS" \
-    _MK="$HUMANGUARD_MASTER_KEY" \
-    _EK="$EXPORT_API_KEY" \
+    _MKNAME="humanGuard/masterKey" \
+    _EKNAME="humanGuard/exportKey" \
     _AO="$ALLOWED_ORIGINS_PROD" \
     _SE="$SENDER_EMAIL" \
     python3 -c "
 import json, os
 print(json.dumps({'Variables': {
-    'PORT':                 os.environ['_PORT'],
-    'CLOUDWATCH_ENABLED':   os.environ['_CW'],
-    'SNS_ALERT_EMAIL':      os.environ['_SNS'],
-    'RDS_SECRET_NAME':      os.environ['_RDS_SECRET'],
-    'DB_MAX_CONNECTIONS':   os.environ['_DBMAX'],
-    'HUMANGUARD_MASTER_KEY':os.environ['_MK'],
-    'EXPORT_API_KEY':       os.environ['_EK'],
-    'ALLOWED_ORIGINS':      os.environ['_AO'],
-    'SENDER_EMAIL':         os.environ['_SE'],
+    'PORT':                    os.environ['_PORT'],
+    'CLOUDWATCH_ENABLED':      os.environ['_CW'],
+    'SNS_ALERT_EMAIL':         os.environ['_SNS'],
+    'RDS_SECRET_NAME':         os.environ['_RDS_SECRET'],
+    'DB_MAX_CONNECTIONS':      os.environ['_DBMAX'],
+    'MASTER_KEY_SECRET_NAME':  os.environ['_MKNAME'],
+    'EXPORT_KEY_SECRET_NAME':  os.environ['_EKNAME'],
+    'ALLOWED_ORIGINS':         os.environ['_AO'],
+    'SENDER_EMAIL':            os.environ['_SE'],
 }}))")
 
 if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$AWS_REGION" > /dev/null 2>&1; then

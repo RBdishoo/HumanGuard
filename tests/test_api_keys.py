@@ -131,6 +131,7 @@ def test_master_key_bypasses_rate_limit():
     try:
         db = _fresh_db()
         master = "hg_master_testkey"
+        app_module._reset_secret_caches()
         with mock.patch.object(app_module, "db_manager", db):
             with mock.patch.dict(os.environ, {"HUMANGUARD_MASTER_KEY": master}):
                 resp = _client().get(
@@ -140,6 +141,7 @@ def test_master_key_bypasses_rate_limit():
         # /api/stats returns 200 when master key is used (no rate limit applied)
         assert resp.status_code == 200
     finally:
+        app_module._reset_secret_caches()
         _restore_testing()
 
 

@@ -59,9 +59,13 @@ def normalizeSignalBatch(data):
 
     normalized = dict(data)
 
-    # sessionId → sessionID
+    # sessionId → sessionID (keep existing alias)
     if 'sessionId' in normalized and 'sessionID' not in normalized:
         normalized['sessionID'] = normalized.pop('sessionId')
+
+    # sessionID → session_id (canonical server-side key)
+    if 'sessionID' in normalized and 'session_id' not in normalized:
+        normalized['session_id'] = normalized.pop('sessionID')
 
     # flat event arrays → signals wrapper
     if 'signals' not in normalized:
@@ -85,8 +89,8 @@ def isValidSignalBatch(data):
         logger.warning("isValidSignalBatch FAILED — data is not a dict (got %s)", type(data))
         return False
 
-    if 'sessionID' not in data:
-        logger.warning("isValidSignalBatch FAILED — missing 'sessionID' (keys present: %s)", list(data.keys()))
+    if 'session_id' not in data:
+        logger.warning("isValidSignalBatch FAILED — missing 'session_id' (keys present: %s)", list(data.keys()))
         return False
 
     if 'signals' not in data:
