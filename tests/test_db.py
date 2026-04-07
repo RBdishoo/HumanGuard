@@ -280,3 +280,60 @@ def test_db_manager_bad_postgres_url_no_crash():
             mgr.save_prediction("s", 0.5, is_bot=True)
         except Exception as exc:
             raise AssertionError(f"save_prediction raised unexpectedly: {exc}") from exc
+
+
+# -------------------------------------------------------------------
+# _resolve_db_kwargs() tests
+# -------------------------------------------------------------------
+
+def test_resolve_db_kwargs_secrets_manager_has_sslmode_require():
+    """_resolve_db_kwargs() returns sslmode='require' when built from Secrets Manager."""
+    db_client = _reset_db_client()
+    secret_payload = json.dumps({
+        "host": "mydb.rds.amazonaws.com",
+        "port": 5432,
+        "dbname": "humanguard",
+        "username": "admin",
+        "password": "s3cr3t",
+    })
+    fake_sm = mock.MagicMock()
+    fake_sm.get_secret_value.return_value = {"SecretString": secret_payload}
+
+    env = {"RDS_SECRET_NAME": "humanGuard/rds", "AWS_REGION": "us-east-1"}
+    with mock.patch.dict(os.environ, env, clear=True):
+        # Remove DATABASE_URL so the Secrets Manager path is taken
+        os.environ.pop("DATABASE_URL", None)
+        db_client.reset()
+        import boto3
+        with mock.patch.object(boto3, "client", return_value=fake_sm):
+            kwargs = db_client._resolve_db_kwargs()
+
+    assert kwargs["sslmode"] == "require"
+    assert kwargs["host"] == "mydb.rds.amazonaws.com"
+    assert kwargs["dbname"] == "humanguard"
+    assert kwargs["user"] == "admin"
+    assert kwargs["password"] == "s3cr3t"
+
+
+def test_resolve_db_kwargs_sqlite_url_has_sslmode_disable():
+    """_resolve_db_kwargs() returns sslmode='disable' for a sqlite:/// DATABASE_URL."""
+    db_client = _reset_db_client()
+    with mock.patch.dict(os.environ, {"DATABASE_URL": "sqlite:///./test.db"}):
+        db_client.reset()
+        kwargs = db_client._resolve_db_kwargs()
+
+    assert kwargs["sslmode"] == "disable"
+
+
+def test_resolve_db_kwargs_postgres_url_has_sslmode_require():
+    """_resolve_db_kwargs() returns sslmode='require' for a postgres:// DATABASE_URL."""
+    db_client = _reset_db_client()
+    with mock.patch.dict(os.environ, {"DATABASE_URL": "postgres://user:pass@host:5432/db"}):
+        db_client.reset()
+        kwargs = db_client._resolve_db_kwargs()
+
+    assert kwargs["sslmode"] == "require"
+    assert kwargs["host"] == "host"
+    assert kwargs["dbname"] == "db"
+    assert kwargs["user"] == "user"
+    assert kwargs["password"] == "pass"

@@ -86,3 +86,37 @@ def test_normalize_leaves_session_id_unchanged():
     result = normalizeSignalBatch(batch)
     assert result["session_id"] == "abc-123"
     assert "sessionID" not in result
+
+
+# -------------------------------------------------------------------
+# isValidSignalBatch — element-type checks
+# -------------------------------------------------------------------
+
+def test_mouseMoves_non_dict_element_returns_false():
+    """isValidSignalBatch rejects a batch where mouseMoves contains a non-dict element."""
+    batch = _valid_batch()
+    batch["signals"]["mouseMoves"] = [{"x": 1, "y": 2, "ts": 100}, "not-a-dict"]
+    assert isValidSignalBatch(batch) is False
+
+
+def test_clicks_non_dict_element_returns_false():
+    """isValidSignalBatch rejects a batch where clicks contains a non-dict element."""
+    batch = _valid_batch()
+    batch["signals"]["clicks"] = [42]
+    assert isValidSignalBatch(batch) is False
+
+
+def test_keys_non_dict_element_returns_false():
+    """isValidSignalBatch rejects a batch where keys contains a non-dict element."""
+    batch = _valid_batch()
+    batch["signals"]["keys"] = [None]
+    assert isValidSignalBatch(batch) is False
+
+
+def test_all_dict_elements_accepted():
+    """isValidSignalBatch accepts a batch where every event list contains only dicts."""
+    batch = _valid_batch()
+    batch["signals"]["mouseMoves"] = [{"x": 1, "y": 2, "ts": 100}]
+    batch["signals"]["clicks"] = [{"ts": 200, "button": 0}]
+    batch["signals"]["keys"] = [{"code": "KeyA", "ts": 300}]
+    assert isValidSignalBatch(batch) is True

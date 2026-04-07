@@ -91,8 +91,10 @@ class SignalCollector:
             sessions = set()
             with open(self.signalsFile, 'r') as f:
                 for line in f:
-                    data = json.loads(line)
-                    sessions.add(data.get('sessionID'))
+                    rec = json.loads(line)
+                    # session_id is the canonical key after normalizeSignalBatch();
+                    # fall back to sessionID for records written before the migration.
+                    sessions.add(rec.get('session_id') or rec.get('sessionID'))
             return len(sessions)
         except Exception as e:
             print(f"Error counting sessions: {e}")

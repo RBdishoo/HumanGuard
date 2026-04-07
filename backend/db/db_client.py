@@ -1,11 +1,13 @@
 """
 PostgreSQL client for HumanGuard.
 
-Connection URL resolution order:
-  1. DATABASE_URL env var — used as-is (local dev / explicit override).
+Connection resolution order:
+  1. DATABASE_URL env var — parsed into libpq keyword arguments (local dev /
+     explicit override).  sqlite:/// URLs get sslmode="disable"; postgres://
+     URLs get sslmode="require".
   2. RDS_SECRET_NAME env var — fetched from AWS Secrets Manager at cold-start
      and cached for the container lifetime so Secrets Manager is never called
-     more than once per Lambda instance.
+     more than once per Lambda instance.  Always enforces sslmode="require".
 
 When neither is set, or the connection fails, every public function degrades
 gracefully so the JSONL path keeps working.
@@ -14,36 +16,52 @@ gracefully so the JSONL path keeps working.
 import os
 import json
 import logging
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
 _pool = None
 _available = None  # tri-state: None = not checked, True/False = result
-_database_url = None  # resolved once per cold start; never stored in env
+_db_kwargs = None  # resolved once per cold start; never stored in env
 
 
-def _resolve_database_url() -> str:
+def _resolve_db_kwargs() -> dict:
     """
-    Return the PostgreSQL DSN, resolving credentials exactly once per
-    Lambda container lifetime.
+    Return libpq keyword arguments for psycopg2.connect(), resolving
+    credentials exactly once per Lambda container lifetime.
 
     Fast path  — DATABASE_URL is set in the environment (local dev or an
-                 explicit override).  Used without touching Secrets Manager.
+                 explicit override).  Parsed with urlparse() so passwords
+                 containing reserved URL characters (@ / : ?) are handled
+                 correctly.  sqlite:/// URLs get sslmode="disable";
+                 postgres:// URLs get sslmode="require".
 
     Cold-start — RDS_SECRET_NAME names a Secrets Manager secret whose JSON
                  payload contains {host, port, dbname, username, password}.
-                 The assembled URL is cached in _database_url so subsequent
-                 calls within the same container are instant.
+                 Always sets sslmode="require".  The result is cached in
+                 _db_kwargs so subsequent calls within the same container
+                 are instant.
     """
-    global _database_url
-    if _database_url is not None:
-        return _database_url
+    global _db_kwargs
+    if _db_kwargs is not None:
+        return _db_kwargs
 
     # Fast path: explicit DATABASE_URL (local dev)
     url = os.environ.get("DATABASE_URL")
     if url:
-        _database_url = url
-        return _database_url
+        parsed = urlparse(url)
+        if parsed.scheme.startswith("sqlite"):
+            _db_kwargs = {"database": parsed.path, "sslmode": "disable"}
+        else:
+            _db_kwargs = {
+                "host": parsed.hostname,
+                "port": parsed.port or 5432,
+                "dbname": parsed.path.lstrip("/"),
+                "user": parsed.username,
+                "password": parsed.password,
+                "sslmode": "require",
+            }
+        return _db_kwargs
 
     # Cold-start path: fetch from Secrets Manager
     secret_name = os.environ.get("RDS_SECRET_NAME")
@@ -59,10 +77,14 @@ def _resolve_database_url() -> str:
     try:
         resp = sm.get_secret_value(SecretId=secret_name)
         secret = json.loads(resp["SecretString"])
-        _database_url = (
-            f"postgresql://{secret['username']}:{secret['password']}"
-            f"@{secret['host']}:{secret['port']}/{secret['dbname']}"
-        )
+        _db_kwargs = {
+            "host": secret["host"],
+            "port": int(secret.get("port", 5432)),
+            "dbname": secret["dbname"],
+            "user": secret["username"],
+            "password": secret["password"],
+            "sslmode": "require",
+        }
         logger.info("DB credentials fetched from Secrets Manager: %s", secret_name)
     except Exception as exc:
         raise RuntimeError(
@@ -70,7 +92,7 @@ def _resolve_database_url() -> str:
             f"(secret='{secret_name}'): {exc}"
         ) from exc
 
-    return _database_url
+    return _db_kwargs
 
 
 def _get_pool():
@@ -82,18 +104,18 @@ def _get_pool():
     import psycopg2
     from psycopg2.pool import SimpleConnectionPool
 
-    _pool = SimpleConnectionPool(minconn=1, maxconn=5, dsn=_resolve_database_url())
+    _pool = SimpleConnectionPool(minconn=1, maxconn=5, **_resolve_db_kwargs())
     return _pool
 
 
 def is_available():
-    """Return True if a database URL can be resolved and a connection succeeds."""
+    """Return True if DB kwargs can be resolved and a connection succeeds."""
     global _available
     if _available is not None:
         return _available
 
     try:
-        _resolve_database_url()
+        _resolve_db_kwargs()
     except RuntimeError:
         _available = False
         return False
@@ -216,7 +238,7 @@ def save_prediction(session_id, prob_bot, label, threshold, scoring_type="batch"
 
 def reset():
     """Reset cached state (for testing)."""
-    global _pool, _available, _database_url
+    global _pool, _available, _db_kwargs
     _pool = None
     _available = None
-    _database_url = None
+    _db_kwargs = None

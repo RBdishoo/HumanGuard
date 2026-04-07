@@ -22,6 +22,8 @@ import hmac as _hmac
 import logging
 import os
 import re
+import secrets
+import socket
 import sys
 import json
 import time
@@ -155,6 +157,11 @@ FEATURE_INTERPRETATIONS = {
 FREE_TIER_LIMIT = 1000
 UNVERIFIED_TRIAL_LIMIT = 10  # free requests before email verification is required
 
+# Input size caps shared by /api/signals and /api/score
+MAX_MOUSE_MOVES = 5000
+MAX_CLICKS = 2000
+MAX_KEYS = 5000
+
 # IP-based rate limiting for /api/register
 _registration_attempts: dict = {}
 _registration_lock = threading.Lock()
@@ -259,7 +266,8 @@ def require_api_key(f=None, *, count_usage=True):
             if request.method == "OPTIONS":
                 return func(*args, **kwargs)
 
-            # Bypass in test mode so existing tests are unaffected
+            # Bypass in test mode so existing tests are unaffected.
+            # TESTING is only set by pytest and is never True in a deployed Lambda container.
             if app.config.get("TESTING"):
                 g.api_key = "test"
                 g.is_master = True
@@ -272,7 +280,7 @@ def require_api_key(f=None, *, count_usage=True):
                 master_key = _resolve_master_key()
             except RuntimeError:
                 master_key = ""
-            if master_key and api_key == master_key:
+            if master_key and _hmac.compare_digest(api_key, master_key):
                 g.api_key = api_key
                 g.is_master = True
                 return func(*args, **kwargs)
@@ -471,9 +479,15 @@ def _log_prediction_local(session_id, prob_bot, label, threshold,
 
 
 def _is_safe_webhook_url(url: str) -> bool:
-    """Return False if the URL targets a private/loopback/link-local address (SSRF guard)."""
+    """Return False if the URL is not https:// or targets a private/loopback address (SSRF guard).
+
+    Checks the literal hostname only.  DNS rebinding is caught at delivery time
+    by _is_safe_resolved_host(), which re-resolves on every request.
+    """
     try:
         parsed = urlparse(url)
+        if parsed.scheme != "https":
+            return False
         hostname = parsed.hostname
         if not hostname:
             return False
@@ -488,32 +502,115 @@ def _is_safe_webhook_url(url: str) -> bool:
                     or addr.is_unspecified or addr.is_multicast):
                 return False
         except ValueError:
-            pass  # It's a domain name; DNS-rebinding risk is accepted at this layer
+            pass  # It's a domain name; DNS rebinding check deferred to _is_safe_resolved_host
     except Exception:
         return False
     return True
 
 
-def _deliver_webhook(webhook: dict, payload_bytes: bytes):
-    """POST a signed payload to a single webhook URL and update its DB status."""
+def _is_safe_resolved_host(hostname: str) -> bool:
+    """Return True only if every IP the hostname resolves to is globally routable.
+
+    Blocks RFC1918 (10/8, 172.16/12, 192.168/16), loopback (127/8),
+    link-local / AWS metadata endpoint (169.254/16), and other reserved ranges.
+    Returns False on DNS failure so unresolvable names are treated as unsafe.
+    Called at delivery time on every request to defeat DNS rebinding attacks.
+    """
+    try:
+        results = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False
+    if not results:
+        return False
+    for *_, sockaddr in results:
+        ip_str = sockaddr[0]
+        try:
+            addr = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False
+        if (addr.is_private or addr.is_loopback or addr.is_link_local
+                or addr.is_reserved or addr.is_unspecified or addr.is_multicast):
+            return False
+    return True
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Prevent urllib from following any 3xx redirects during webhook delivery."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            req.full_url, code,
+            f"Webhook redirect blocked ({code} → {newurl})",
+            headers, fp,
+        )
+
+
+_WEBHOOK_OPENER = urllib.request.build_opener(_NoRedirectHandler())
+
+
+def _deliver_webhook(webhook: dict, payload_bytes: bytes) -> tuple:
+    """POST a signed payload to a single webhook URL and update its DB status.
+
+    Security controls applied before every delivery:
+    - HTTPS required: plain HTTP URLs are rejected.
+    - DNS rebinding guard: hostname is re-resolved at delivery time; any address
+      in RFC1918, loopback, or link-local space (incl. 169.254.169.254) is blocked.
+    - Redirect blocking: 3xx responses raise an error rather than being followed.
+    - Replay protection: a unique delivery_id and fresh timestamp are injected into
+      the payload before signing.  Receivers should validate that the timestamp is
+      within a 5-minute window to prevent replay attacks.
+
+    Returns (success, delivery_id, sig).
+    """
+    url = webhook["url"]
+
+    # Require HTTPS at delivery time (belt-and-suspenders after registration check)
+    if not url.startswith("https://"):
+        logger.warning("Webhook id=%s skipped: non-HTTPS URL %r", webhook.get("id"), url)
+        db_manager.update_webhook_status(webhook["id"], False)
+        return False, "", ""
+
+    # Re-resolve hostname to defend against DNS rebinding
+    hostname = urlparse(url).hostname or ""
+    if not _is_safe_resolved_host(hostname):
+        logger.warning(
+            "Webhook id=%s blocked: hostname %r resolved to a private/reserved address",
+            webhook.get("id"), hostname,
+        )
+        db_manager.update_webhook_status(webhook["id"], False)
+        return False, "", ""
+
+    # Inject per-delivery fields before signing so the signature covers them.
+    # delivery_id is unique per request; receivers should also reject payloads
+    # whose timestamp is outside a 5-minute window to prevent replay attacks.
+    try:
+        payload_dict = json.loads(payload_bytes)
+    except Exception:
+        payload_dict = {}
+    delivery_id = secrets.token_hex(16)
+    payload_dict["delivery_id"] = delivery_id
+    payload_dict["timestamp"] = datetime.now(timezone.utc).isoformat()
+    payload_bytes = json.dumps(payload_dict).encode("utf-8")
+
     secret = webhook.get("secret", "")
     sig = _hmac.new(secret.encode(), payload_bytes, hashlib.sha256).hexdigest()
     req = urllib.request.Request(
-        webhook["url"],
+        url,
         data=payload_bytes,
         headers={
             "Content-Type": "application/json",
             "X-HumanGuard-Signature": f"sha256={sig}",
+            "X-HumanGuard-Delivery": delivery_id,
         },
         method="POST",
     )
     success = False
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with _WEBHOOK_OPENER.open(req, timeout=5) as resp:
             success = 200 <= resp.status < 300
     except Exception as exc:
         logger.debug("Webhook delivery failed for id=%s: %s", webhook.get("id"), exc)
     db_manager.update_webhook_status(webhook["id"], success)
+    return success, delivery_id, sig
 
 
 def _fire_webhooks(api_key_id: str, session_id: str, prob_bot: float,
@@ -603,10 +700,6 @@ def scoreSignals():
         mouseMoves = signals.get("mouseMoves") or []
         clicks = signals.get("clicks") or []
         keys = signals.get("keys") or []
-
-        MAX_MOUSE_MOVES = 5000
-        MAX_CLICKS = 2000
-        MAX_KEYS = 5000
 
         if len(mouseMoves) > MAX_MOUSE_MOVES or len(clicks) > MAX_CLICKS or len(keys) > MAX_KEYS:
             return jsonify({
@@ -1119,12 +1212,31 @@ def saveSignals():
                 }), 400
 
         sig = data.get("signals") or {}
+        mouseMoves = sig.get("mouseMoves") or []
+        clicks     = sig.get("clicks") or []
+        keys       = sig.get("keys") or []
+
+        if len(mouseMoves) > MAX_MOUSE_MOVES or len(clicks) > MAX_CLICKS or len(keys) > MAX_KEYS:
+            return jsonify({
+                "Error": "Signal batch too large",
+                "counts": {
+                    "mouseMoves": len(mouseMoves),
+                    "clicks": len(clicks),
+                    "keys": len(keys),
+                },
+                "max": {
+                    "mouseMoves": MAX_MOUSE_MOVES,
+                    "clicks": MAX_CLICKS,
+                    "keys": MAX_KEYS,
+                }
+            }), 413
+
         logger.info(
             "Received signal batch session=%s moves=%s clicks=%s keys=%s",
             data.get("session_id"),
-            len(sig.get("mouseMoves") or []),
-            len(sig.get("clicks") or []),
-            len(sig.get("keys") or []),
+            len(mouseMoves),
+            len(clicks),
+            len(keys),
         )
 
         #Save to file
@@ -1538,7 +1650,7 @@ def exportSessions():
         export_key = None
     if not export_key:
         return jsonify({"error": "export not configured"}), 503
-    if not api_key or api_key != export_key:
+    if not api_key or not _hmac.compare_digest(api_key, export_key):
         return jsonify({"error": "Unauthorized"}), 401
 
     records = []
@@ -1793,8 +1905,8 @@ def registerWebhook():
     secret = str(data.get("secret", "")).strip()
     events = data.get("events") or []
 
-    if not url or not url.startswith(("http://", "https://")):
-        return jsonify({"error": "url must be a valid http/https URL"}), 400
+    if not url or not url.startswith("https://"):
+        return jsonify({"error": "url must be a valid https URL"}), 400
     if not _is_safe_webhook_url(url):
         return jsonify({"error": "webhook URL cannot target internal or reserved addresses"}), 400
     if not secret:
@@ -1860,7 +1972,6 @@ def testWebhook(webhook_id):
 
     payload = {
         "event": "test",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
         "session_id": "test-session",
         "prob_bot": 0.5,
         "confidence": "high",
@@ -1868,22 +1979,10 @@ def testWebhook(webhook_id):
         "top_features": [],
     }
     payload_bytes = json.dumps(payload).encode("utf-8")
-
-    secret = webhook.get("secret", "")
-    sig = _hmac.new(secret.encode(), payload_bytes, hashlib.sha256).hexdigest()
-    req = urllib.request.Request(
-        webhook["url"],
-        data=payload_bytes,
-        headers={
-            "Content-Type": "application/json",
-            "X-HumanGuard-Signature": f"sha256={sig}",
-        },
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            success = 200 <= resp.status < 300
-        return jsonify({"success": success, "signature": f"sha256={sig}"}), 200
+        success, delivery_id, sig = _deliver_webhook(webhook, payload_bytes)
+        return jsonify({"success": success, "signature": f"sha256={sig}",
+                        "delivery_id": delivery_id}), 200
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 200
 

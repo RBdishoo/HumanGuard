@@ -292,3 +292,33 @@ def test_wrong_secret_rejected():
 
     # Original key still works
     assert db.validate_api_key(key) is not None
+
+
+# ---------------------------------------------------------------------------
+# 12. Master key bypass uses constant-time comparison
+# ---------------------------------------------------------------------------
+
+def test_master_key_bypass_uses_compare_digest():
+    """require_api_key uses hmac.compare_digest for the master key check."""
+    import hmac as _hmac_mod
+    db = _fresh_db()
+    master = "master-secret-key"
+
+    try:
+        with mock.patch.object(app_module, "_resolve_master_key", return_value=master), \
+             mock.patch.object(app_module, "db_manager", db), \
+             mock.patch.object(app_module._hmac, "compare_digest",
+                               wraps=_hmac_mod.compare_digest) as mock_cd:
+            client = _client()
+            client.get(
+                "/api/stats",
+                headers={"X-Api-Key": master},
+            )
+        mock_cd.assert_called()
+        # Verify the master key and provided key were among the args
+        call_args = [set(call.args) for call in mock_cd.call_args_list]
+        assert any(master in args for args in call_args), (
+            "compare_digest was not called with the master key"
+        )
+    finally:
+        _restore_testing()

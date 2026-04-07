@@ -104,9 +104,19 @@ def isValidSignalBatch(data):
         return False
 
     for key in ["mouseMoves", "clicks", "keys"]:
-        if key in signals and not isinstance(signals[key], list):
-            logger.warning("isValidSignalBatch FAILED — signals.%s must be a list (got %s)", key, type(signals[key]))
+        val = signals.get(key)
+        if val is None:
+            continue
+        if not isinstance(val, list):
+            logger.warning("isValidSignalBatch FAILED — signals.%s must be a list (got %s)", key, type(val))
             return False
+        for elem in val:
+            if not isinstance(elem, dict):
+                logger.warning(
+                    "isValidSignalBatch FAILED — signals.%s contains non-dict element (got %s)",
+                    key, type(elem),
+                )
+                return False
 
     return True
     

@@ -151,14 +151,13 @@ def test_webhook_fires_on_bot_detection():
 
 
 # ---------------------------------------------------------------------------
-# 4. HMAC signature is correct
+# 4. HMAC signature covers the final (delivery_id-injected) payload
 # ---------------------------------------------------------------------------
 
 def test_hmac_signature_is_correct():
     secret = "supersecret"
     payload = {
         "event": "bot_detected",
-        "timestamp": "2026-01-01T00:00:00+00:00",
         "session_id": "s1",
         "prob_bot": 0.9,
         "confidence": "high",
@@ -167,29 +166,35 @@ def test_hmac_signature_is_correct():
     }
     payload_bytes = json.dumps(payload).encode("utf-8")
 
-    # Expected signature
-    expected_sig = hmac.new(secret.encode(), payload_bytes, hashlib.sha256).hexdigest()
-
-    # Simulate what _deliver_webhook does
-    received_headers = {}
+    received = {}
 
     class FakeResp:
         status = 200
         def __enter__(self): return self
         def __exit__(self, *a): pass
 
-    def fake_urlopen(req, timeout):
-        received_headers["sig"] = req.get_header("X-humanguard-signature")
+    def fake_open(req, timeout):
+        received["sig"] = req.get_header("X-humanguard-signature")
+        received["body"] = req.data
+        received["delivery"] = req.get_header("X-humanguard-delivery")
         return FakeResp()
 
     webhook = {"id": 1, "url": "https://example.com/hook", "secret": secret}
 
     db = _fresh_db()
     with mock.patch.object(app_module, "db_manager", db), \
-         mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+         mock.patch.object(app_module, "_is_safe_resolved_host", return_value=True), \
+         mock.patch.object(app_module._WEBHOOK_OPENER, "open", side_effect=fake_open):
         app_module._deliver_webhook(webhook, payload_bytes)
 
-    assert received_headers["sig"] == f"sha256={expected_sig}"
+    # Signature must cover the *actual* bytes sent (which include delivery_id + timestamp)
+    actual_bytes = received["body"]
+    expected_sig = hmac.new(secret.encode(), actual_bytes, hashlib.sha256).hexdigest()
+    assert received["sig"] == f"sha256={expected_sig}"
+
+    # delivery_id in header must match the field injected into the payload
+    actual_payload = json.loads(actual_bytes)
+    assert received["delivery"] == actual_payload["delivery_id"]
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +239,7 @@ def test_webhook_disabled_after_5_failures():
 
 
 # ---------------------------------------------------------------------------
-# 7. Test endpoint sends payload
+# 7. Test endpoint sends payload (uses _deliver_webhook signing path)
 # ---------------------------------------------------------------------------
 
 def test_test_endpoint_sends_payload():
@@ -248,14 +253,16 @@ def test_test_endpoint_sends_payload():
 
     captured = {}
 
-    def fake_urlopen(req, timeout):
+    def fake_open(req, timeout):
         captured["url"] = req.full_url
         captured["body"] = req.data
         captured["sig"] = req.get_header("X-humanguard-signature")
+        captured["delivery"] = req.get_header("X-humanguard-delivery")
         return FakeResp()
 
     with mock.patch.object(app_module, "db_manager", db), \
-         mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+         mock.patch.object(app_module, "_is_safe_resolved_host", return_value=True), \
+         mock.patch.object(app_module._WEBHOOK_OPENER, "open", side_effect=fake_open):
         client = _client(db)
         resp = client.post(f"/api/webhooks/{wh_id}/test")
 
@@ -268,6 +275,9 @@ def test_test_endpoint_sends_payload():
     assert payload["event"] == "test"
     assert payload["session_id"] == "test-session"
     assert captured["sig"].startswith("sha256=")
+    # delivery_id must appear in both the header and the payload
+    assert "delivery_id" in payload
+    assert captured["delivery"] == payload["delivery_id"]
 
 
 # ---------------------------------------------------------------------------
@@ -327,3 +337,148 @@ def test_score_completed_fires_on_every_score():
     assert json.loads(resp.data)["label"] == "human"
     assert len(calls) >= 1
     assert calls[0]["event"] == "score_completed"
+
+
+# ---------------------------------------------------------------------------
+# 9. _is_safe_resolved_host rejects private / reserved IP ranges
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("ip,label", [
+    ("10.0.0.1",       "RFC1918 class-A"),
+    ("10.255.255.255",  "RFC1918 class-A boundary"),
+    ("172.16.0.1",     "RFC1918 class-B"),
+    ("172.31.255.255",  "RFC1918 class-B boundary"),
+    ("192.168.0.1",    "RFC1918 class-C"),
+    ("192.168.255.254", "RFC1918 class-C boundary"),
+    ("127.0.0.1",      "loopback"),
+    ("127.255.255.255", "loopback boundary"),
+    ("169.254.0.1",    "link-local / AWS metadata"),
+    ("169.254.169.254", "AWS IMDS endpoint"),
+])
+def test_is_safe_resolved_host_rejects_private(ip, label):
+    """_is_safe_resolved_host returns False for all private/reserved ranges."""
+    with mock.patch("socket.getaddrinfo", return_value=[(None, None, None, None, (ip, 0))]):
+        assert app_module._is_safe_resolved_host("internal.example.com") is False, (
+            f"Expected False for {label} ({ip})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 10. _is_safe_resolved_host accepts a real public IP
+# ---------------------------------------------------------------------------
+
+def test_is_safe_resolved_host_accepts_public_ip():
+    """_is_safe_resolved_host returns True for a globally routable address."""
+    public_ip = "93.184.216.34"  # example.com
+    with mock.patch("socket.getaddrinfo", return_value=[(None, None, None, None, (public_ip, 0))]):
+        assert app_module._is_safe_resolved_host("example.com") is True
+
+
+# ---------------------------------------------------------------------------
+# 11. _deliver_webhook skips delivery when resolved host is private
+# ---------------------------------------------------------------------------
+
+def test_deliver_webhook_blocks_private_resolved_host():
+    """_deliver_webhook returns (False, …) and does not open a connection when
+    the hostname resolves to a private address."""
+    db = _fresh_db()
+    webhook = {"id": 42, "url": "https://rebind.example.com/hook", "secret": "s"}
+
+    opener_called = []
+
+    with mock.patch.object(app_module, "db_manager", db), \
+         mock.patch.object(app_module, "_is_safe_resolved_host", return_value=False), \
+         mock.patch.object(app_module._WEBHOOK_OPENER, "open",
+                           side_effect=lambda *a, **kw: opener_called.append(True)):
+        success, delivery_id, sig = app_module._deliver_webhook(webhook, b'{"event":"test"}')
+
+    assert success is False
+    assert opener_called == [], "HTTP request must not be made for a private resolved host"
+
+
+# ---------------------------------------------------------------------------
+# 12. _deliver_webhook skips delivery for http:// URLs
+# ---------------------------------------------------------------------------
+
+def test_deliver_webhook_blocks_http_url():
+    """_deliver_webhook returns (False, …) and does not open a connection for non-HTTPS URLs."""
+    db = _fresh_db()
+    webhook = {"id": 99, "url": "http://example.com/hook", "secret": "s"}
+
+    opener_called = []
+
+    with mock.patch.object(app_module, "db_manager", db), \
+         mock.patch.object(app_module._WEBHOOK_OPENER, "open",
+                           side_effect=lambda *a, **kw: opener_called.append(True)):
+        success, delivery_id, sig = app_module._deliver_webhook(webhook, b'{"event":"test"}')
+
+    assert success is False
+    assert opener_called == [], "HTTP request must not be made for a plain-HTTP webhook URL"
+
+
+# ---------------------------------------------------------------------------
+# 13. Webhook payloads include delivery_id and timestamp
+# ---------------------------------------------------------------------------
+
+def test_webhook_payload_includes_delivery_id_and_timestamp():
+    """_deliver_webhook injects delivery_id and timestamp into every payload."""
+    db = _fresh_db()
+    webhook = {"id": 7, "url": "https://recv.example.com/hook", "secret": "sec"}
+    original = {"event": "bot_detected", "session_id": "s1", "prob_bot": 0.9}
+
+    captured_body = {}
+
+    class FakeResp:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+
+    def fake_open(req, timeout):
+        captured_body["data"] = req.data
+        return FakeResp()
+
+    with mock.patch.object(app_module, "db_manager", db), \
+         mock.patch.object(app_module, "_is_safe_resolved_host", return_value=True), \
+         mock.patch.object(app_module._WEBHOOK_OPENER, "open", side_effect=fake_open):
+        app_module._deliver_webhook(webhook, json.dumps(original).encode())
+
+    sent = json.loads(captured_body["data"])
+    assert "delivery_id" in sent, "delivery_id must be present in sent payload"
+    assert "timestamp" in sent, "timestamp must be present in sent payload"
+    assert len(sent["delivery_id"]) == 32, "delivery_id should be 32 hex chars (token_hex(16))"
+    # Original fields must still be present
+    assert sent["event"] == "bot_detected"
+    assert sent["session_id"] == "s1"
+
+
+# ---------------------------------------------------------------------------
+# 14. X-HumanGuard-Delivery header matches delivery_id in payload
+# ---------------------------------------------------------------------------
+
+def test_webhook_delivery_header_present():
+    """_deliver_webhook sets X-HumanGuard-Delivery to the same value as payload delivery_id."""
+    db = _fresh_db()
+    webhook = {"id": 8, "url": "https://recv.example.com/hook", "secret": "sec"}
+
+    captured = {}
+
+    class FakeResp:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+
+    def fake_open(req, timeout):
+        captured["header"] = req.get_header("X-humanguard-delivery")
+        captured["body"] = req.data
+        return FakeResp()
+
+    with mock.patch.object(app_module, "db_manager", db), \
+         mock.patch.object(app_module, "_is_safe_resolved_host", return_value=True), \
+         mock.patch.object(app_module._WEBHOOK_OPENER, "open", side_effect=fake_open):
+        app_module._deliver_webhook(webhook, b'{"event":"score_completed"}')
+
+    sent = json.loads(captured["body"])
+    assert captured["header"] is not None, "X-HumanGuard-Delivery header must be set"
+    assert captured["header"] == sent["delivery_id"], (
+        "X-HumanGuard-Delivery header must equal the delivery_id field in the payload"
+    )

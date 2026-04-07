@@ -71,6 +71,79 @@ def test_signals_empty_body():
 
 
 # -------------------------------------------------------------------
+# POST /api/signals — size cap (413)
+# -------------------------------------------------------------------
+
+def test_signals_oversized_mouseMoves_returns_413(tmp_path):
+    """saveSignals returns 413 when mouseMoves exceeds MAX_MOUSE_MOVES."""
+    collector = app_module.collector
+    original_file = collector.signalsFile
+    collector.signalsFile = str(tmp_path / "signals.jsonl")
+    (tmp_path / "signals.jsonl").touch()
+    try:
+        batch = _valid_batch()
+        batch["signals"]["mouseMoves"] = [{"x": i, "y": i, "ts": i}
+                                          for i in range(app_module.MAX_MOUSE_MOVES + 1)]
+        with mock.patch("db.db_client.is_available", return_value=False):
+            resp = _client().post(
+                "/api/signals",
+                data=json.dumps(batch),
+                content_type="application/json",
+            )
+        assert resp.status_code == 413
+        body = json.loads(resp.data)
+        assert body["max"]["mouseMoves"] == app_module.MAX_MOUSE_MOVES
+    finally:
+        collector.signalsFile = original_file
+
+
+def test_signals_oversized_clicks_returns_413(tmp_path):
+    """saveSignals returns 413 when clicks exceeds MAX_CLICKS."""
+    collector = app_module.collector
+    original_file = collector.signalsFile
+    collector.signalsFile = str(tmp_path / "signals.jsonl")
+    (tmp_path / "signals.jsonl").touch()
+    try:
+        batch = _valid_batch()
+        batch["signals"]["clicks"] = [{"ts": i, "button": 0}
+                                       for i in range(app_module.MAX_CLICKS + 1)]
+        with mock.patch("db.db_client.is_available", return_value=False):
+            resp = _client().post(
+                "/api/signals",
+                data=json.dumps(batch),
+                content_type="application/json",
+            )
+        assert resp.status_code == 413
+        body = json.loads(resp.data)
+        assert body["max"]["clicks"] == app_module.MAX_CLICKS
+    finally:
+        collector.signalsFile = original_file
+
+
+def test_signals_oversized_keys_returns_413(tmp_path):
+    """saveSignals returns 413 when keys exceeds MAX_KEYS."""
+    collector = app_module.collector
+    original_file = collector.signalsFile
+    collector.signalsFile = str(tmp_path / "signals.jsonl")
+    (tmp_path / "signals.jsonl").touch()
+    try:
+        batch = _valid_batch()
+        batch["signals"]["keys"] = [{"code": "KeyA", "ts": i}
+                                     for i in range(app_module.MAX_KEYS + 1)]
+        with mock.patch("db.db_client.is_available", return_value=False):
+            resp = _client().post(
+                "/api/signals",
+                data=json.dumps(batch),
+                content_type="application/json",
+            )
+        assert resp.status_code == 413
+        body = json.loads(resp.data)
+        assert body["max"]["keys"] == app_module.MAX_KEYS
+    finally:
+        collector.signalsFile = original_file
+
+
+# -------------------------------------------------------------------
 # POST /api/score
 # -------------------------------------------------------------------
 

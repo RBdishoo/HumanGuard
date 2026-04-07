@@ -105,3 +105,39 @@ def test_source_defaults_to_none(tmp_path):
     stored = json.loads(jsonl.read_text().strip().splitlines()[-1])
     assert stored.get("source") is None
     assert stored.get("utm_source") is None
+
+
+# -------------------------------------------------------------------
+# session_id key migration tests
+# -------------------------------------------------------------------
+
+def _normalized_batch(session_id="sess-norm"):
+    """Return a batch already normalized to snake_case session_id, as app.py produces."""
+    return {
+        "session_id": session_id,
+        "metadata": {"userAgent": "test"},
+        "signals": {"mouseMoves": [], "clicks": [], "keys": []},
+    }
+
+
+def test_save_and_count_with_session_id_key(tmp_path):
+    """saveSignalBatch stores normalized batches; getSessionCount reads session_id correctly."""
+    collector, _ = _make_collector(tmp_path)
+    with mock.patch("db.db_client.is_available", return_value=False):
+        collector.saveSignalBatch(_normalized_batch("s-a"))
+        collector.saveSignalBatch(_normalized_batch("s-b"))
+        collector.saveSignalBatch(_normalized_batch("s-a"))  # duplicate
+    assert collector.getSessionCount() == 2
+
+
+def test_session_count_mixed_old_and_new_keys(tmp_path):
+    """getSessionCount handles a JSONL file mixing old sessionID and new session_id records."""
+    collector, jsonl = _make_collector(tmp_path)
+    # Write one old-format record directly (pre-migration, using camelCase key)
+    jsonl.write_text(
+        json.dumps({"sessionID": "legacy-sess",
+                    "signals": {"mouseMoves": [], "clicks": [], "keys": []}}) + "\n" +
+        json.dumps({"session_id": "new-sess",
+                    "signals": {"mouseMoves": [], "clicks": [], "keys": []}}) + "\n"
+    )
+    assert collector.getSessionCount() == 2
