@@ -7,7 +7,9 @@ Tests for leaderboard endpoints:
 import sys
 import os
 import json
+import re
 import tempfile
+from datetime import datetime, timezone, timedelta
 from unittest import mock
 from pathlib import Path
 
@@ -307,3 +309,111 @@ def test_leaderboard_full_flow():
     body = json.loads(lb_resp.data)
     assert "rank" in body
     assert "total" in body
+
+
+# ── time_ago correctness ───────────────────────────────────────────────────────
+
+_TIME_AGO_RE = re.compile(r"^(just now|\d+m ago|\d+h ago)$")
+
+_FAKE_STATS = {"total": 1, "avg_prob_bot": 0.1, "pct_human": 100.0}
+
+
+def _get_leaderboard_with_entries(entries):
+    """Helper: GET /api/leaderboard with mocked DB returning *entries*."""
+    client = _client()
+    with mock.patch.object(app_module.db_manager, "get_leaderboard", return_value=entries):
+        with mock.patch.object(
+            app_module.db_manager, "get_leaderboard_stats", return_value=_FAKE_STATS
+        ):
+            return client.get("/api/leaderboard")
+
+
+def test_time_ago_sqlite_string_created_at():
+    """time_ago is a non-empty valid string when created_at is an ISO string (SQLite path)."""
+    # Simulate a row created 10 minutes ago as a naive ISO string (SQLite behaviour)
+    ts = datetime.now(timezone.utc) - timedelta(minutes=10)
+    entries = [{
+        "nickname": "Alice",
+        "prob_bot": 0.05,
+        "verdict": "human",
+        "session_id": "sess-sqlite",
+        "created_at": ts.strftime("%Y-%m-%dT%H:%M:%S"),  # naive ISO string, no tz suffix
+    }]
+    resp = _get_leaderboard_with_entries(entries)
+    assert resp.status_code == 200
+    body = json.loads(resp.data)
+    time_ago = body["entries"][0]["time_ago"]
+    assert time_ago != "", "time_ago must not be empty for a valid SQLite string created_at"
+    assert _TIME_AGO_RE.match(time_ago), f"Unexpected time_ago format: {time_ago!r}"
+
+
+def test_time_ago_postgres_datetime_created_at():
+    """time_ago is a non-empty valid string when created_at is a tz-aware datetime (PostgreSQL path)."""
+    # Simulate a row created 90 minutes ago as a tz-aware datetime object (psycopg2 behaviour)
+    ts = datetime.now(timezone.utc) - timedelta(minutes=90)
+    entries = [{
+        "nickname": "Bob",
+        "prob_bot": 0.12,
+        "verdict": "human",
+        "session_id": "sess-postgres",
+        "created_at": ts,  # native datetime — the bug case
+    }]
+    resp = _get_leaderboard_with_entries(entries)
+    assert resp.status_code == 200
+    body = json.loads(resp.data)
+    time_ago = body["entries"][0]["time_ago"]
+    assert time_ago != "", "time_ago must not be empty for a datetime created_at (PostgreSQL bug regression)"
+    assert _TIME_AGO_RE.match(time_ago), f"Unexpected time_ago format: {time_ago!r}"
+    # 90 minutes → "1h ago"
+    assert time_ago == "1h ago", f"Expected '1h ago' for 90-minute-old entry, got {time_ago!r}"
+
+
+def test_time_ago_postgres_naive_datetime_created_at():
+    """time_ago is correct when created_at is a tz-naive datetime (PostgreSQL TIMESTAMP without tz)."""
+    ts = datetime.now(timezone.utc) - timedelta(minutes=5)
+    entries = [{
+        "nickname": "Carol",
+        "prob_bot": 0.03,
+        "verdict": "human",
+        "session_id": "sess-naive",
+        "created_at": ts.replace(tzinfo=None),  # naive datetime — no tzinfo
+    }]
+    resp = _get_leaderboard_with_entries(entries)
+    assert resp.status_code == 200
+    body = json.loads(resp.data)
+    time_ago = body["entries"][0]["time_ago"]
+    assert time_ago != "", "time_ago must not be empty for a naive datetime created_at"
+    assert _TIME_AGO_RE.match(time_ago), f"Unexpected time_ago format: {time_ago!r}"
+    assert time_ago == "5m ago", f"Expected '5m ago' for 5-minute-old entry, got {time_ago!r}"
+
+
+def test_time_ago_just_now():
+    """Entries created less than 1 minute ago show 'just now'."""
+    ts = datetime.now(timezone.utc) - timedelta(seconds=30)
+    entries = [{
+        "nickname": "Dave",
+        "prob_bot": 0.01,
+        "verdict": "human",
+        "session_id": "sess-justnow",
+        "created_at": ts,
+    }]
+    resp = _get_leaderboard_with_entries(entries)
+    assert resp.status_code == 200
+    body = json.loads(resp.data)
+    assert body["entries"][0]["time_ago"] == "just now"
+
+
+def test_time_ago_missing_created_at():
+    """Entries with no created_at degrade gracefully to empty string (not an error)."""
+    entries = [{
+        "nickname": "Eve",
+        "prob_bot": 0.5,
+        "verdict": "bot",
+        "session_id": "sess-notime",
+        "created_at": None,
+    }]
+    resp = _get_leaderboard_with_entries(entries)
+    assert resp.status_code == 200
+    body = json.loads(resp.data)
+    # Empty string is acceptable for a null created_at — must not crash
+    assert body["entries"][0]["time_ago"] == ""

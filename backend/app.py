@@ -44,6 +44,25 @@ from enrichment import enrich_request
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_created_at(val):
+    """Return a timezone-aware UTC datetime from a DB created_at value, or None.
+
+    psycopg2 returns native datetime objects (tz-aware when the column is
+    TIMESTAMPTZ, naive otherwise).  SQLite returns ISO strings.  Both are
+    normalised here so callers can safely do arithmetic with datetime.now(utc).
+    """
+    if isinstance(val, datetime):
+        return val if val.tzinfo else val.replace(tzinfo=timezone.utc)
+    if isinstance(val, str) and val:
+        try:
+            ts = datetime.fromisoformat(val.replace("Z", "+00:00"))
+            return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
 #Initialize Flask application
 app = Flask(__name__, static_folder='../frontend', static_url_path='')
 _DEFAULT_ORIGINS = ",".join([
@@ -1145,7 +1164,7 @@ def _dashboard_stats_from_pg(threshold):
             "sessionID": r[0],
             "prob_bot": float(r[1]),
             "label": r[2],
-            "timestamp": r[3].isoformat() if r[3] else None,
+            "timestamp": _parse_created_at(r[3]).isoformat() if _parse_created_at(r[3]) else None,
             "scoring_type": r[4],
         }
         for r in rows
@@ -1371,15 +1390,13 @@ def leaderboardGet():
         entries = db_manager.get_leaderboard(limit=limit)
         stats = db_manager.get_leaderboard_stats()
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         result = []
         for i, e in enumerate(entries):
-            created_at = e.get("created_at", "")
             try:
-                if isinstance(created_at, str) and created_at:
-                    ts = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                    diff = now - ts.replace(tzinfo=None)
-                    mins = int(diff.total_seconds() / 60)
+                ts = _parse_created_at(e.get("created_at"))
+                if ts is not None:
+                    mins = int((now - ts).total_seconds() / 60)
                     if mins < 1:
                         time_ago = "just now"
                     elif mins < 60:
@@ -1389,7 +1406,7 @@ def leaderboardGet():
                 else:
                     time_ago = ""
             except Exception:
-                time_ago = str(created_at) if created_at else ""
+                time_ago = ""
 
             result.append({
                 "rank": i + 1,
@@ -1638,10 +1655,10 @@ def clientPredictions():
     api_key = getattr(g, "api_key", "")
     limit = max(1, min(int(request.args.get("limit", 50)), 200))
     predictions = db_manager.get_client_predictions(api_key, limit=limit)
-    # Serialize datetime objects
+    # Serialize created_at — handles both datetime objects (PostgreSQL) and strings (SQLite)
     for p in predictions:
-        if hasattr(p.get("created_at"), "isoformat"):
-            p["created_at"] = p["created_at"].isoformat()
+        ts = _parse_created_at(p.get("created_at"))
+        p["created_at"] = ts.isoformat() if ts is not None else None
     return jsonify(predictions), 200
 
 
@@ -1709,19 +1726,16 @@ def listWebhooks():
     webhooks = db_manager.get_webhooks_for_key(api_key_id, active_only=False)
     result = []
     for wh in webhooks:
-        created = wh.get("created_at")
-        last_triggered = wh.get("last_triggered_at")
+        created_ts = _parse_created_at(wh.get("created_at"))
+        triggered_ts = _parse_created_at(wh.get("last_triggered_at"))
         result.append({
             "id": wh["id"],
             "url": wh["url"],
             "events": [e for e in wh.get("events", "").split(",") if e],
             "active": bool(wh["active"]),
             "failure_count": wh.get("failure_count", 0),
-            "created_at": created.isoformat() if hasattr(created, "isoformat") else created,
-            "last_triggered_at": (
-                last_triggered.isoformat()
-                if hasattr(last_triggered, "isoformat") else last_triggered
-            ),
+            "created_at": created_ts.isoformat() if created_ts is not None else None,
+            "last_triggered_at": triggered_ts.isoformat() if triggered_ts is not None else None,
         })
     return jsonify(result), 200
 
