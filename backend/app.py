@@ -1390,7 +1390,6 @@ def _dashboard_stats_from_pg(threshold):
 
 
 @app.route('/api/dashboard-stats', methods=['GET'])
-@require_api_key
 def dashboardStats():
     """
     GET /api/dashboard-stats
@@ -1427,7 +1426,6 @@ def serveDashboard():
 
 
 @app.route('/api/model-info', methods=['GET'])
-@require_api_key
 def modelInfo():
     """
     GET /api/model-info
@@ -1487,16 +1485,32 @@ def modelInfo():
         return jsonify({"error": str(exc)}), 500
 
 
+def _serve_with_api_key_meta(filename):
+    """Serve an HTML file from the frontend/ directory, injecting DEMO_API_KEY
+    from the environment as <meta name="hg-api-key"> so the page's JS can
+    attach it to API requests without a secret ever appearing in source code.
+    Falls back to send_from_directory when no key is configured."""
+    demo_key = os.environ.get('DEMO_API_KEY', '')
+    if not demo_key:
+        return send_from_directory('../frontend', filename)
+    html_path = Path(__file__).parent.parent / 'frontend' / filename
+    with open(html_path, 'r', encoding='utf-8') as fh:
+        html = fh.read()
+    meta_tag = f'<meta name="hg-api-key" content="{demo_key}">'
+    html = html.replace('</head>', meta_tag + '\n</head>', 1)
+    return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
+
+
 @app.route('/demo', methods=['GET'])
 def serveDemo():
     """GET /demo — Serves the public-facing human verification demo."""
-    return send_from_directory('../frontend', 'demo.html')
+    return _serve_with_api_key_meta('demo.html')
 
 
 @app.route('/simulate', methods=['GET'])
 def serveSimulator():
     """GET /simulate — Serves the internal bot behavior simulator."""
-    return send_from_directory('../frontend', 'bot_simulator.html')
+    return _serve_with_api_key_meta('bot_simulator.html')
 
 
 @app.route('/leaderboard', methods=['GET'])
